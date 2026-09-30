@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { Send, Swords, Scroll, User, Settings, Package, MapPin, Heart, Droplets, Coins, Star, Zap, AlertCircle, Save } from 'lucide-react';
+import { Send, Swords, Scroll, User, Settings, Package, MapPin, Heart, Droplets, Coins, Star, Zap, AlertCircle, Save, BookOpen } from 'lucide-react';
 import SaveLoadModal from './SaveLoadModal';
+import WeatherDisplay from './WeatherSystem';
+import MiniMap from './MiniMap';
+import Journal from './Journal';
 
 export default function GameScreen() {
   const {
@@ -18,9 +21,11 @@ export default function GameScreen() {
   
   const [intentText, setIntentText] = useState('');
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showJournal, setShowJournal] = useState(false);
   const narrativeEndRef = useRef<HTMLDivElement>(null);
   const character = gameState.character!;
   const lastTurn = gameState.turns[gameState.turns.length - 1];
+  const { visitedLocations, journalEntries, addJournalEntry, deleteJournalEntry, settings } = useGameStore();
 
   useEffect(() => {
     narrativeEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -66,10 +71,11 @@ export default function GameScreen() {
       {/* Header */}
       <header className="bg-gray-800/80 backdrop-blur-sm border-b border-gray-700 px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold text-amber-400">⚔️ Realm of Echoes</h1>
+          <h1 className="text-lg font-bold text-amber-400 hidden md:block">⚔️ Realm of Echoes</h1>
           <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">
             Turn {gameState.turnCount}
           </span>
+          <WeatherDisplay turnCount={gameState.turnCount} worldTheme={settings.worldTheme} />
           <button
             onClick={() => setShowSaveModal(true)}
             className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-2 py-1 rounded transition-all flex items-center gap-1"
@@ -78,12 +84,23 @@ export default function GameScreen() {
             <Save className="w-3 h-3" />
             <span className="hidden sm:inline">Save</span>
           </button>
+          <button
+            onClick={() => setShowJournal(!showJournal)}
+            className={`text-xs px-2 py-1 rounded transition-all flex items-center gap-1 ${
+              showJournal ? 'bg-amber-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white'
+            }`}
+            title="Journal"
+          >
+            <BookOpen className="w-3 h-3" />
+            <span className="hidden sm:inline">Journal</span>
+          </button>
         </div>
-        <div className="flex items-center gap-4 text-sm">
-          <div className="flex items-center gap-1">
-            <MapPin className="w-3.5 h-3.5 text-blue-400" />
-            <span className="text-gray-300">{gameState.location}</span>
-          </div>
+        <div className="flex items-center gap-3 text-sm">
+          <MiniMap
+            currentLocation={gameState.location}
+            visitedLocations={visitedLocations}
+            totalLocations={Math.max(8, visitedLocations.length + 3)}
+          />
           <div className="flex items-center gap-1">
             <Coins className="w-3.5 h-3.5 text-yellow-400" />
             <span className="text-gray-300">{character.gold}g</span>
@@ -110,6 +127,19 @@ export default function GameScreen() {
           >
             Configure AI →
           </button>
+        </div>
+      )}
+
+      {/* Journal Panel */}
+      {showJournal && (
+        <div className="absolute top-14 right-4 z-30 w-96 max-h-[70vh] overflow-y-auto shadow-2xl">
+          <Journal
+            entries={journalEntries}
+            onAddEntry={addJournalEntry}
+            onDeleteEntry={deleteJournalEntry}
+            currentTurn={gameState.turnCount}
+            currentLocation={gameState.location}
+          />
         </div>
       )}
 
