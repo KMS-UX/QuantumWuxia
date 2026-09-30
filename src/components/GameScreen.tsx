@@ -20,10 +20,32 @@ export default function GameScreen() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const narrativeEndRef = useRef<HTMLDivElement>(null);
   const character = gameState.character!;
+  const lastTurn = gameState.turns[gameState.turns.length - 1];
 
   useEffect(() => {
     narrativeEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [gameState.turns]);
+
+  // Keyboard shortcuts for choices (1-5)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if typing in input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const key = parseInt(e.key);
+      if (key >= 1 && key <= 5 && lastTurn && !isLoading) {
+        const choice = lastTurn.choices.find(c => c.id === key);
+        if (choice) {
+          makeChoice(choice.id, choice.text);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lastTurn, isLoading, makeChoice]);
 
   const handleIntent = () => {
     if (intentText.trim() && !isLoading) {
@@ -32,14 +54,12 @@ export default function GameScreen() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleInputKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleIntent();
     }
   };
-
-  const lastTurn = gameState.turns[gameState.turns.length - 1];
 
   return (
     <div className="h-screen flex flex-col bg-gray-900 text-white overflow-hidden">
@@ -320,7 +340,7 @@ export default function GameScreen() {
                   <textarea
                     value={intentText}
                     onChange={(e) => setIntentText(e.target.value)}
-                    onKeyDown={handleKeyDown}
+                    onKeyDown={handleInputKeyDown}
                     placeholder="🔮 Write what you want to do... (or choose an option above)"
                     rows={2}
                     disabled={isLoading}

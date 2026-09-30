@@ -20,6 +20,10 @@ interface GameStore {
   activeTab: 'narrative' | 'character' | 'inventory' | 'quests' | 'settings';
   showCharacterCreation: boolean;
   isDemoMode: boolean;
+  sessionStartTime: number;
+  lastAutoSave: number | null;
+  isAutoSaving: boolean;
+  tutorialCompleted: boolean;
   
   // Actions
   startNewGame: (character: Character) => Promise<void>;
@@ -36,6 +40,8 @@ interface GameStore {
   loadGame: (slotId: string) => void;
   deleteSave: (slotId: string) => void;
   checkAchievements: () => void;
+  autoSave: () => void;
+  completeTutorial: () => void;
 }
 
 const defaultLLMConfig: LLMConfig = {
@@ -174,6 +180,10 @@ export const useGameStore = create<GameStore>()(
       activeTab: 'narrative',
       showCharacterCreation: false,
       isDemoMode: false,
+      sessionStartTime: Date.now(),
+      lastAutoSave: null,
+      isAutoSaving: false,
+      tutorialCompleted: false,
       
       startNewGame: async (character: Character) => {
         const { settings } = get();
@@ -532,6 +542,47 @@ export const useGameStore = create<GameStore>()(
           set({ achievements: updatedAchievements });
         }
       },
+      
+      autoSave: () => {
+        const { gameState, settings } = get();
+        if (!gameState.isGameStarted || !gameState.character) return;
+        
+        set({ isAutoSaving: true });
+        
+        // Auto-save to a special slot
+        const autoSaveSlot: SaveSlot = {
+          id: 'autosave',
+          name: 'Auto-save',
+          timestamp: Date.now(),
+          gameState: JSON.parse(JSON.stringify(gameState)),
+          settings: JSON.parse(JSON.stringify(settings)),
+          turnCount: gameState.turnCount,
+          characterName: gameState.character?.name || 'Unknown',
+          characterLevel: gameState.character?.level || 1,
+        };
+        
+        // Update or create autosave slot
+        const { saveSlots } = get();
+        const existingIndex = saveSlots.findIndex(s => s.id === 'autosave');
+        const newSlots = [...saveSlots];
+        if (existingIndex >= 0) {
+          newSlots[existingIndex] = autoSaveSlot;
+        } else {
+          newSlots.unshift(autoSaveSlot);
+        }
+        
+        setTimeout(() => {
+          set({ 
+            saveSlots: newSlots,
+            lastAutoSave: Date.now(),
+            isAutoSaving: false,
+          });
+        }, 500);
+      },
+      
+      completeTutorial: () => {
+        set({ tutorialCompleted: true });
+      },
     }),
     {
       name: 'rpg-game-storage',
@@ -540,6 +591,7 @@ export const useGameStore = create<GameStore>()(
         settings: state.settings,
         saveSlots: state.saveSlots,
         achievements: state.achievements,
+        tutorialCompleted: state.tutorialCompleted,
       }),
     }
   )

@@ -1,18 +1,36 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGameStore } from './store/gameStore';
 import CharacterCreation from './components/CharacterCreation';
 import GameScreen from './components/GameScreen';
 import SettingsPanel from './components/SettingsPanel';
 import WelcomeScreen from './components/WelcomeScreen';
+import Tutorial from './components/Tutorial';
+import KeyboardShortcuts from './components/KeyboardShortcuts';
+import AutoSaveIndicator from './components/AutoSaveIndicator';
 import { Settings } from 'lucide-react';
 
 type AppView = 'welcome' | 'character-creation' | 'game' | 'settings';
 
 export default function App() {
-  const { gameState, activeTab, setActiveTab } = useGameStore();
+  const { gameState, activeTab, setActiveTab, tutorialCompleted, completeTutorial, lastAutoSave, isAutoSaving, autoSave } = useGameStore();
   const [view, setView] = useState<AppView>(
     gameState.isGameStarted ? 'game' : 'welcome'
   );
+  const [showTutorial, setShowTutorial] = useState(false);
+
+  // Show tutorial for new players
+  useEffect(() => {
+    if (gameState.isGameStarted && !tutorialCompleted) {
+      setShowTutorial(true);
+    }
+  }, [gameState.isGameStarted, tutorialCompleted]);
+
+  // Auto-save every 5 turns
+  useEffect(() => {
+    if (gameState.isGameStarted && gameState.turnCount > 0 && gameState.turnCount % 5 === 0) {
+      autoSave();
+    }
+  }, [gameState.turnCount, gameState.isGameStarted, autoSave]);
 
   const handleStartAdventure = () => {
     setView('character-creation');
@@ -86,6 +104,26 @@ export default function App() {
   // Game screen
   return (
     <div className="relative h-screen">
+      {/* Tutorial */}
+      {showTutorial && (
+        <Tutorial
+          onComplete={() => {
+            setShowTutorial(false);
+            completeTutorial();
+          }}
+          onSkip={() => {
+            setShowTutorial(false);
+            completeTutorial();
+          }}
+        />
+      )}
+
+      {/* Auto-save indicator */}
+      <AutoSaveIndicator lastSaved={lastAutoSave} isSaving={isAutoSaving} />
+
+      {/* Keyboard shortcuts help */}
+      <KeyboardShortcuts />
+
       {/* Mobile panels overlay */}
       {activeTab === 'settings' && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-gray-900">
@@ -206,7 +244,7 @@ function CharacterPanel() {
             <p className="text-gray-400 text-sm italic">No skills learned yet. Skills are gained through gameplay.</p>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {character.skills.map((skill, i) => (
+              {character.skills.map((skill: string, i: number) => (
                 <span key={i} className="bg-purple-900/50 border border-purple-700/50 text-purple-300 px-3 py-1 rounded-full text-sm">
                   {skill}
                 </span>
@@ -264,7 +302,7 @@ function InventoryPanel() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {character.inventory.map((item) => (
+            {character.inventory.map((item: any) => (
               <div key={item.id} className={`border rounded-xl p-4 ${typeColors[item.type]}`}>
                 <div className="flex items-start gap-3">
                   <span className="text-2xl">{typeIcons[item.type]}</span>
