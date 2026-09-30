@@ -5,6 +5,8 @@ import { Character, GameState, GameSettings, GameTurn, LLMConfig, GameChoice, Sa
 import { generateNarrative, generateCharacterIntro, testConnection, LLMResponse } from '../services/llmService';
 import { DEFAULT_ACHIEVEMENTS } from '../components/Achievements';
 import { JournalEntry } from '../components/Journal';
+import { database } from '../services/database';
+import { changeTracker } from '../services/changeTracker';
 
 interface GameStore {
   // Game state
@@ -201,10 +203,20 @@ export const useGameStore = create<GameStore>()(
         const { settings } = get();
         set({ isLoading: true, error: null });
         
+        // Initialize database
+        try {
+          await database.init();
+        } catch (error) {
+          console.error('Database initialization failed:', error);
+        }
+        
         // Check if demo mode
         const isDemo = settings.llmConfig.baseUrl === 'demo' || settings.llmConfig.provider === 'custom' && settings.llmConfig.model === 'demo';
         
         try {
+          const gameId = uuidv4();
+          changeTracker.setGameId(gameId);
+          
           const state: GameState = {
             character,
             turns: [],
@@ -216,6 +228,11 @@ export const useGameStore = create<GameStore>()(
             isGameOver: false,
             turnCount: 0,
           };
+          
+          // Save initial state to database
+          await database.saveGameState(gameId, state, settings);
+          await database.setMetadata('currentGameId', gameId);
+          await database.setMetadata('sessionStartTime', Date.now());
           
           let response: LLMResponse;
           
@@ -307,17 +324,28 @@ export const useGameStore = create<GameStore>()(
           
           const newLocation = response.stateUpdates?.locationChange || gameState.location;
           
+          const newState: GameState = {
+            ...gameState,
+            character: updatedCharacter,
+            turns: [...gameState.turns, turn],
+            currentScene: response.narrative,
+            location: newLocation,
+            turnCount: gameState.turnCount + 1,
+          };
+          
           set({
-            gameState: {
-              ...gameState,
-              character: updatedCharacter,
-              turns: [...gameState.turns, turn],
-              currentScene: response.narrative,
-              location: newLocation,
-              turnCount: gameState.turnCount + 1,
-            },
+            gameState: newState,
             isLoading: false,
           });
+          
+          // Track state changes in database
+          try {
+            await changeTracker.trackStateChange(gameState, newState, newState.turnCount);
+            await changeTracker.trackPlayerAction(choiceText, false, newState.turnCount);
+            await database.logVisitedLocation(changeTracker['gameId'], newLocation, newState.turnCount);
+          } catch (error) {
+            console.error('Failed to track changes:', error);
+          }
           
           // Track visited location
           get().addVisitedLocation(newLocation);
