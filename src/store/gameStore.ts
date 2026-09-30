@@ -289,17 +289,23 @@ export const useGameStore = create<GameStore>()(
             isLoading: false,
             isDemoMode: true,
             error: `Could not connect to AI. Running in demo mode. Configure your LLM in Settings for full AI narration.`,
-            gameState: {
-              character,
-              isGameStarted: true,
-              turns: [turn],
-              currentScene: response.narrative,
-              location: response.stateUpdates?.locationChange || 'Dungeon Cell',
-              turnCount: 1,
-              questLog: [],
-              relationships: [],
-              isGameOver: false,
-            },
+            gameState: (() => {
+              const initialState: GameState = {
+                character,
+                isGameStarted: true,
+                turns: [turn],
+                currentScene: response.narrative,
+                location: response.stateUpdates?.locationChange || 'Dungeon Cell',
+                turnCount: 1,
+                questLog: [],
+                relationships: [],
+                isGameOver: false,
+              };
+              return {
+                ...initialState,
+                simulation: createSimulationState(initialState, [initialState.location]),
+              };
+            })(),
           });
         }
       },
