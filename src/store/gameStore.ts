@@ -9,6 +9,7 @@ import { database } from '../services/database';
 import { changeTracker } from '../services/changeTracker';
 import { soundManager } from '../services/soundManager';
 import { resolvePlayerAction } from '../engine/actionPipeline';
+import { createSimulationState } from '../engine/simulationAdapter';
 
 interface GameStore {
   // Game state
@@ -258,13 +259,19 @@ export const useGameStore = create<GameStore>()(
           };
           
           set({
-            gameState: {
-              ...state,
-              turns: [turn],
-              currentScene: response.narrative,
-              location: response.stateUpdates?.locationChange || state.location,
-              turnCount: 1,
-            },
+            gameState: (() => {
+              const initialState: GameState = {
+                ...state,
+                turns: [turn],
+                currentScene: response.narrative,
+                location: response.stateUpdates?.locationChange || state.location,
+                turnCount: 1,
+              };
+              return {
+                ...initialState,
+                simulation: createSimulationState(initialState, [initialState.location]),
+              };
+            })(),
             isLoading: false,
             activeTab: 'narrative',
           });
