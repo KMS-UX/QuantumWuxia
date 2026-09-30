@@ -1,13 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import { Character, GameState, GameSettings, GameTurn, LLMConfig, GameChoice } from '../types/game';
+import { Character, GameState, GameSettings, GameTurn, LLMConfig, GameChoice, SaveSlot, Achievement } from '../types/game';
 import { generateNarrative, generateCharacterIntro, testConnection, LLMResponse } from '../services/llmService';
+import { DEFAULT_ACHIEVEMENTS } from '../components/Achievements';
 
 interface GameStore {
   // Game state
   gameState: GameState;
   settings: GameSettings;
+  saveSlots: SaveSlot[];
+  achievements: Achievement[];
   
   // UI state
   isLoading: boolean;
@@ -29,6 +32,10 @@ interface GameStore {
   clearError: () => void;
   resetGame: () => void;
   loadSavedGame: () => void;
+  saveGame: (name: string) => void;
+  loadGame: (slotId: string) => void;
+  deleteSave: (slotId: string) => void;
+  checkAchievements: () => void;
 }
 
 const defaultLLMConfig: LLMConfig = {
@@ -45,6 +52,8 @@ const defaultSettings: GameSettings = {
   fontSize: 'medium',
   narrativeStyle: 'detailed',
   worldTheme: 'fantasy',
+  soundEnabled: true,
+  animationsEnabled: true,
 };
 
 const defaultGameState: GameState = {
@@ -156,6 +165,8 @@ export const useGameStore = create<GameStore>()(
     (set, get) => ({
       gameState: { ...defaultGameState },
       settings: { ...defaultSettings },
+      saveSlots: [],
+      achievements: DEFAULT_ACHIEVEMENTS,
       isLoading: false,
       error: null,
       connectionStatus: 'disconnected',
@@ -283,6 +294,9 @@ export const useGameStore = create<GameStore>()(
             },
             isLoading: false,
           });
+          
+          // Check achievements after turn
+          setTimeout(() => get().checkAchievements(), 100);
         } catch (error) {
           // Fall back to demo
           const response = getDemoResponse(choiceText);
@@ -408,12 +422,124 @@ export const useGameStore = create<GameStore>()(
       loadSavedGame: () => {
         set({ activeTab: 'narrative' });
       },
+      
+      saveGame: (name: string) => {
+        const { gameState, settings, saveSlots } = get();
+        const newSlot: SaveSlot = {
+          id: uuidv4(),
+          name,
+          timestamp: Date.now(),
+          gameState: JSON.parse(JSON.stringify(gameState)),
+          settings: JSON.parse(JSON.stringify(settings)),
+          turnCount: gameState.turnCount,
+          characterName: gameState.character?.name || 'Unknown',
+          characterLevel: gameState.character?.level || 1,
+        };
+        set({ saveSlots: [...saveSlots, newSlot] });
+      },
+      
+      loadGame: (slotId: string) => {
+        const { saveSlots } = get();
+        const slot = saveSlots.find(s => s.id === slotId);
+        if (slot) {
+          set({
+            gameState: slot.gameState,
+            settings: slot.settings,
+            isDemoMode: false,
+            activeTab: 'narrative',
+          });
+        }
+      },
+      
+      deleteSave: (slotId: string) => {
+        const { saveSlots } = get();
+        set({ saveSlots: saveSlots.filter(s => s.id !== slotId) });
+      },
+      
+      checkAchievements: () => {
+        const { gameState, achievements } = get();
+        const character = gameState.character;
+        if (!character) return;
+        
+        const updatedAchievements = [...achievements];
+        let changed = false;
+        
+        // Check survivor achievement (10 turns)
+        if (gameState.turnCount >= 10) {
+          const idx = updatedAchievements.findIndex(a => a.id === 'survivor');
+          if (idx !== -1 && !updatedAchievements[idx].unlocked) {
+            updatedAchievements[idx] = { ...updatedAchievements[idx], unlocked: true, unlockedAt: Date.now() };
+            changed = true;
+          }
+        }
+        
+        // Check treasure hunter (100 gold)
+        if (character.gold >= 100) {
+          const idx = updatedAchievements.findIndex(a => a.id === 'treasure-hunter');
+          if (idx !== -1 && !updatedAchievements[idx].unlocked) {
+            updatedAchievements[idx] = { ...updatedAchievements[idx], unlocked: true, unlockedAt: Date.now() };
+            changed = true;
+          }
+        }
+        
+        // Check level up (level 2)
+        if (character.level >= 2) {
+          const idx = updatedAchievements.findIndex(a => a.id === 'level-up');
+          if (idx !== -1 && !updatedAchievements[idx].unlocked) {
+            updatedAchievements[idx] = { ...updatedAchievements[idx], unlocked: true, unlockedAt: Date.now() };
+            changed = true;
+          }
+        }
+        
+        // Check social butterfly (3 relationships)
+        if (gameState.relationships.length >= 3) {
+          const idx = updatedAchievements.findIndex(a => a.id === 'social-butterfly');
+          if (idx !== -1 && !updatedAchievements[idx].unlocked) {
+            updatedAchievements[idx] = { ...updatedAchievements[idx], unlocked: true, unlockedAt: Date.now() };
+            changed = true;
+          }
+        }
+        
+        // Check master collector (10 items)
+        if (character.inventory.length >= 10) {
+          const idx = updatedAchievements.findIndex(a => a.id === 'master-collector');
+          if (idx !== -1 && !updatedAchievements[idx].unlocked) {
+            updatedAchievements[idx] = { ...updatedAchievements[idx], unlocked: true, unlockedAt: Date.now() };
+            changed = true;
+          }
+        }
+        
+        // Check storyteller (5 intents)
+        const intentCount = gameState.turns.filter(t => t.isIntent).length;
+        if (intentCount >= 5) {
+          const idx = updatedAchievements.findIndex(a => a.id === 'storyteller');
+          if (idx !== -1 && !updatedAchievements[idx].unlocked) {
+            updatedAchievements[idx] = { ...updatedAchievements[idx], unlocked: true, unlockedAt: Date.now() };
+            changed = true;
+          }
+        }
+        
+        // Check veteran (50 turns)
+        if (gameState.turnCount >= 50) {
+          const idx = updatedAchievements.findIndex(a => a.id === 'veteran');
+          if (idx !== -1 && !updatedAchievements[idx].unlocked) {
+            updatedAchievements[idx] = { ...updatedAchievements[idx], unlocked: true, unlockedAt: Date.now() };
+            changed = true;
+          }
+        }
+        
+        if (changed) {
+          set({ achievements: updatedAchievements });
+        }
+      },
     }),
     {
       name: 'rpg-game-storage',
       partialize: (state) => ({
         gameState: state.gameState,
         settings: state.settings,
+        saveSlots: state.saveSlots,
+        achievements: state.achievements,
       }),
     }
   )

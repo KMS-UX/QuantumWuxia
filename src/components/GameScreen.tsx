@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { Send, Swords, Scroll, User, Settings, Package, MapPin, Heart, Droplets, Coins, Star, Zap, AlertCircle } from 'lucide-react';
+import { Send, Swords, Scroll, User, Settings, Package, MapPin, Heart, Droplets, Coins, Star, Zap, AlertCircle, Save } from 'lucide-react';
+import SaveLoadModal from './SaveLoadModal';
 
 export default function GameScreen() {
   const {
@@ -16,6 +17,7 @@ export default function GameScreen() {
   } = useGameStore();
   
   const [intentText, setIntentText] = useState('');
+  const [showSaveModal, setShowSaveModal] = useState(false);
   const narrativeEndRef = useRef<HTMLDivElement>(null);
   const character = gameState.character!;
 
@@ -48,6 +50,14 @@ export default function GameScreen() {
           <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">
             Turn {gameState.turnCount}
           </span>
+          <button
+            onClick={() => setShowSaveModal(true)}
+            className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-2 py-1 rounded transition-all flex items-center gap-1"
+            title="Save/Load Game"
+          >
+            <Save className="w-3 h-3" />
+            <span className="hidden sm:inline">Save</span>
+          </button>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-1">
@@ -376,6 +386,9 @@ export default function GameScreen() {
           Settings
         </button>
       </nav>
+
+      {/* Save/Load Modal */}
+      {showSaveModal && <SaveLoadModal onClose={() => setShowSaveModal(false)} />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { LLMConfig } from '../types/game';
-import { Wifi, WifiOff, Server, Cloud, Monitor, Settings as SettingsIcon, RefreshCw, RotateCcw, ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { Wifi, WifiOff, Server, Cloud, Monitor, Settings as SettingsIcon, RefreshCw, RotateCcw, ChevronDown, ChevronUp, Info, Download, FileText } from 'lucide-react';
 
 const PROVIDERS = [
   {
@@ -43,11 +43,53 @@ const PROVIDERS = [
 ];
 
 export default function SettingsPanel() {
-  const { settings, updateSettings, testLLMConnection, connectionStatus, connectionMessage, resetGame } = useGameStore();
+  const { settings, updateSettings, testLLMConnection, connectionStatus, connectionMessage, resetGame, gameState } = useGameStore();
   const [config, setConfig] = useState<LLMConfig>(settings.llmConfig);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [customModel, setCustomModel] = useState('');
   const [isTesting, setIsTesting] = useState(false);
+
+  const exportGameLog = () => {
+    if (!gameState.character || gameState.turns.length === 0) {
+      alert('No game log to export. Start a game first!');
+      return;
+    }
+
+    const character = gameState.character;
+    let log = `═══════════════════════════════════════════════════════════\n`;
+    log += `  REALM OF ECHOES - ADVENTURE LOG\n`;
+    log += `═══════════════════════════════════════════════════════════\n\n`;
+    log += `Character: ${character.name}\n`;
+    log += `Race: ${character.race} | Class: ${character.class}\n`;
+    log += `Level: ${character.level} | Gold: ${character.gold}\n`;
+    log += `Location: ${gameState.location}\n`;
+    log += `Total Turns: ${gameState.turnCount}\n`;
+    log += `Date: ${new Date().toLocaleString()}\n\n`;
+    log += `───────────────────────────────────────────────────────────\n\n`;
+
+    gameState.turns.forEach((turn, index) => {
+      log += `【 TURN ${index + 1} 】\n\n`;
+      log += `${turn.narrative}\n\n`;
+      if (turn.playerAction) {
+        log += `▶ You: ${turn.playerAction}\n\n`;
+      }
+      log += `───────────────────────────────────────────────────────────\n\n`;
+    });
+
+    log += `\n═══════════════════════════════════════════════════════════\n`;
+    log += `  END OF LOG\n`;
+    log += `═══════════════════════════════════════════════════════════\n`;
+
+    const blob = new Blob([log], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `realm-of-echoes-${character.name}-${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const selectedProvider = PROVIDERS.find(p => p.id === config.provider) || PROVIDERS[0];
 
@@ -379,6 +421,23 @@ export default function SettingsPanel() {
             )}
           </div>
         )}
+
+        {/* Export Game Log */}
+        <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-6 mb-6">
+          <h3 className="font-bold text-white mb-3 flex items-center gap-2">
+            <FileText className="text-amber-400" /> Export Game Log
+          </h3>
+          <p className="text-sm text-gray-400 mb-3">
+            Export your adventure as a text file to keep a record of your journey.
+          </p>
+          <button
+            onClick={exportGameLog}
+            className="bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-all flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" />
+            Export Adventure Log
+          </button>
+        </div>
 
         {/* Danger Zone */}
         <div className="bg-red-900/10 border border-red-800/50 rounded-xl p-6">

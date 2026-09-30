@@ -90,4 +90,42 @@ export interface GameSettings {
   fontSize: 'small' | 'medium' | 'large';
   narrativeStyle: 'detailed' | 'concise' | 'dramatic';
   worldTheme: 'fantasy' | 'sci-fi' | 'horror' | 'wuxia' | 'custom';
+  soundEnabled: boolean;
+  animationsEnabled: boolean;
+}
+
+export interface SaveSlot {
+  id: string;
+  name: string;
+  timestamp: number;
+  gameState: GameState;
+  settings: GameSettings;
+  turnCount: number;
+  characterName: string;
+  characterLevel: number;
+}
+
+export interface CombatState {
+  active: boolean;
+  enemy?: Enemy;
+  playerTurn: boolean;
+  log: string[];
+}
+
+export interface Enemy {
+  name: string;
+  hp: number;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  description: string;
+}
+
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  unlocked: boolean;
+  unlockedAt?: number;
 }
