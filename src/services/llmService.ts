@@ -16,7 +16,7 @@ export interface LLMResponse {
   };
 }
 
-const SYSTEM_PROMPT = `You are a masterful RPG Game Master narrating a text-based adventure. Your role:
+const SYSTEM_PROMPT = `You are the narrative layer of QuantumWuxia, a persistent Wuxia-fantasy RPG simulation. You are not the game engine and you must never invent authoritative state changes. Your role:
 - Describe scenes vividly but concisely (2-4 paragraphs)
 - Present exactly 5 numbered choices for the player, each with a risk level
 - Track the game world state consistently
@@ -84,6 +84,18 @@ function buildContextPrompt(state: GameState, playerAction: string): string {
     context += '\n';
   }
   
+  if (state.simulation) {
+    const simulation = state.simulation;
+    context += `### Authoritative Simulation\n`;
+    context += `- Simulation turn: ${simulation.world.turn}\n`;
+    context += `- Current location id: ${simulation.character.locationId}\n`;
+    context += `- HP: ${simulation.character.hp}/${simulation.character.maxHp}\n`;
+    context += `- Qi: ${simulation.character.qi}/${simulation.character.maxQi}\n`;
+    context += `- Fatigue: ${simulation.character.fatigue}/100\n`;
+    context += `- Conditions: ${simulation.character.conditions.map(c => c.id).join(', ') || 'None'}\n`;
+    context += `- Known facts: ${simulation.world.knownFacts.join(', ') || 'None'}\n\n`;
+  }
+
   // Recent history (last 5 turns)
   const recentTurns = turns.slice(-5);
   if (recentTurns.length > 0) {
