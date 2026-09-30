@@ -4,6 +4,7 @@ import CharacterCreation from './components/CharacterCreation';
 import GameScreen from './components/GameScreen';
 import SettingsPanel from './components/SettingsPanel';
 import WelcomeScreen from './components/WelcomeScreen';
+import MainMenu from './components/MainMenu';
 import Tutorial from './components/Tutorial';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
 import AutoSaveIndicator from './components/AutoSaveIndicator';
@@ -12,14 +13,28 @@ import DeathScreen from './components/DeathScreen';
 import CommandPalette, { useCommandPalette } from './components/CommandPalette';
 import { Settings } from 'lucide-react';
 
-type AppView = 'welcome' | 'character-creation' | 'game' | 'settings';
+type AppView = 'main-menu' | 'welcome' | 'character-creation' | 'game' | 'settings';
 
 export default function App() {
-  const { gameState, activeTab, setActiveTab, tutorialCompleted, completeTutorial, lastAutoSave, isAutoSaving, autoSave } = useGameStore();
+  const { gameState, activeTab, setActiveTab, tutorialCompleted, completeTutorial, lastAutoSave, isAutoSaving, autoSave, saveSlots } = useGameStore();
   const [view, setView] = useState<AppView>(
-    gameState.isGameStarted ? 'game' : 'welcome'
+    gameState.isGameStarted ? 'game' : 'main-menu'
   );
   const [showTutorial, setShowTutorial] = useState(false);
+
+  const handleMainMenuNewGame = () => {
+    setView('character-creation');
+  };
+
+  const handleMainMenuContinue = () => {
+    if (gameState.isGameStarted) {
+      setView('game');
+    }
+  };
+
+  const handleMainMenuLoad = () => {
+    setView('welcome');
+  };
 
   // Show tutorial for new players
   useEffect(() => {
@@ -68,6 +83,27 @@ export default function App() {
     );
   }
 
+  // Main Menu
+  if (view === 'main-menu') {
+    return (
+      <MainMenu
+        hasSaveData={gameState.isGameStarted || saveSlots.length > 0}
+        onNewGame={handleMainMenuNewGame}
+        onContinue={handleMainMenuContinue}
+        onLoadGame={handleMainMenuLoad}
+        onSettings={handleOpenSettings}
+        onAchievements={() => {}}
+        onDatabase={() => {}}
+        stats={{
+          totalPlayTime: Math.floor((Date.now() - (gameState as any).sessionStartTime || Date.now()) / 1000),
+          totalGamesPlayed: saveSlots.length,
+          highestLevel: gameState.character?.level || 1,
+          totalAchievements: 0,
+        }}
+      />
+    );
+  }
+
   // Welcome screen
   if (view === 'welcome') {
     return (
@@ -106,7 +142,7 @@ export default function App() {
 
   // Game screen
   const { isOpen: isCommandPaletteOpen, open: openCommandPalette, close: closeCommandPalette } = useCommandPalette();
-  const { isDead, gameState: currentGameState, resetGame, revive, saveSlots } = useGameStore();
+  const { isDead, gameState: currentGameState, resetGame, revive } = useGameStore();
 
   const commandPaletteCommands = [
     { id: 'save', label: 'Save Game', icon: '💾', category: 'Game', description: 'Save your current progress', action: () => {} },
