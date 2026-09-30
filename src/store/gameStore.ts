@@ -8,6 +8,7 @@ import { JournalEntry } from '../components/Journal';
 import { database } from '../services/database';
 import { changeTracker } from '../services/changeTracker';
 import { soundManager } from '../services/soundManager';
+import { resolvePlayerAction } from '../engine/actionPipeline';
 
 interface GameStore {
   // Game state
@@ -300,20 +301,24 @@ export const useGameStore = create<GameStore>()(
         const { gameState, settings, isDemoMode } = get();
         soundManager.choiceConfirm();
         set({ isLoading: true, error: null });
-        
+
         try {
+          const selectedChoice = gameState.turns[gameState.turns.length - 1]?.choices.find(c => c.id === choiceId);
+          const prepared = resolvePlayerAction(gameState, choiceText, selectedChoice?.risk ?? 'medium');
+          const resolvedState = prepared.nextGameState;
+          const resolutionContext = `[Resolved action: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+
           let response: LLMResponse;
-          
           if (isDemoMode) {
             response = getDemoResponse(choiceText);
           } else {
             response = await generateNarrative(
               settings.llmConfig,
-              gameState,
-              `[Chose option ${choiceId}]: ${choiceText}`
+              resolvedState,
+              `[Chose option ${choiceId}]: ${choiceText}\n${resolutionContext}`
             );
           }
-          
+
           const turn: GameTurn = {
             id: uuidv4(),
             narrative: response.narrative,
@@ -321,95 +326,61 @@ export const useGameStore = create<GameStore>()(
             playerAction: choiceText,
             timestamp: Date.now(),
           };
-          
-          const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
-          
-          const newLocation = response.stateUpdates?.locationChange || gameState.location;
-          
+
           const newState: GameState = {
-            ...gameState,
-            character: updatedCharacter,
-            turns: [...gameState.turns, turn],
+            ...resolvedState,
+            turns: [...resolvedState.turns, turn],
             currentScene: response.narrative,
-            location: newLocation,
-            turnCount: gameState.turnCount + 1,
           };
-          
+
           set({
             gameState: newState,
             isLoading: false,
           });
-          
-          // Track state changes in database
+
           try {
             await changeTracker.trackStateChange(gameState, newState, newState.turnCount);
             await changeTracker.trackPlayerAction(choiceText, false, newState.turnCount);
-            await database.logVisitedLocation(changeTracker['gameId'], newLocation, newState.turnCount);
+            await database.logVisitedLocation(changeTracker['gameId'], newState.location, newState.turnCount);
           } catch (error) {
             console.error('Failed to track changes:', error);
           }
-          
-          // Track visited location
-          get().addVisitedLocation(newLocation);
-          
-          // Check for death
-          if (updatedCharacter.stats.currentHp <= 0) {
+
+          get().addVisitedLocation(newState.location);
+          if (newState.character?.stats.currentHp <= 0) {
             get().setDead(true);
           }
-          
-          // Check achievements after turn
           setTimeout(() => get().checkAchievements(), 100);
         } catch (error) {
-          // Fall back to demo
-          const response = getDemoResponse(choiceText);
-          const turn: GameTurn = {
-            id: uuidv4(),
-            narrative: response.narrative,
-            choices: response.choices,
-            playerAction: choiceText,
-            timestamp: Date.now(),
-          };
-          
-          const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
-          
+          console.error('Player choice resolution failed:', error);
           set({
             isLoading: false,
-            isDemoMode: true,
-            gameState: {
-              ...gameState,
-              character: updatedCharacter,
-              turns: [...gameState.turns, turn],
-              currentScene: response.narrative,
-              turnCount: gameState.turnCount + 1,
-            },
+            error: (error as Error).message,
           });
-          
-          // Track visited location and check for death
-          get().addVisitedLocation(gameState.location);
-          if (updatedCharacter.stats.currentHp <= 0) {
-            get().setDead(true);
-          }
         }
       },
-      
+
       useIntent: async (action: string) => {
         const { gameState, settings, isDemoMode } = get();
         soundManager.intentSubmit();
         set({ isLoading: true, error: null });
-        
+
         try {
+          const prepared = resolvePlayerAction(gameState, action, 'medium');
+          const resolvedState = prepared.nextGameState;
+          const resolutionContext = `[Resolved intent: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+
           let response: LLMResponse;
-          
           if (isDemoMode) {
             response = getDemoResponse(action);
           } else {
             response = await generateNarrative(
               settings.llmConfig,
-              gameState,
-              `[Intent]: ${action}`
+              resolvedState,
+              `[Intent]: ${action}\n${resolutionContext}`
             );
           }
-          
+
           const turn: GameTurn = {
             id: uuidv4(),
             narrative: response.narrative,
@@ -418,60 +389,39 @@ export const useGameStore = create<GameStore>()(
             timestamp: Date.now(),
             isIntent: true,
           };
-          
-          const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
-          const newLocation = response.stateUpdates?.locationChange || gameState.location;
-          
+
+          const newState: GameState = {
+            ...resolvedState,
+            turns: [...resolvedState.turns, turn],
+            currentScene: response.narrative,
+          };
+
           set({
-            gameState: {
-              ...gameState,
-              character: updatedCharacter,
-              turns: [...gameState.turns, turn],
-              currentScene: response.narrative,
-              location: newLocation,
-              turnCount: gameState.turnCount + 1,
-            },
+            gameState: newState,
             isLoading: false,
           });
-          
-          // Track visited location and check for death
-          get().addVisitedLocation(newLocation);
-          if (updatedCharacter.stats.currentHp <= 0) {
+
+          try {
+            await changeTracker.trackStateChange(gameState, newState, newState.turnCount);
+            await changeTracker.trackPlayerAction(action, true, newState.turnCount);
+            await database.logVisitedLocation(changeTracker['gameId'], newState.location, newState.turnCount);
+          } catch (error) {
+            console.error('Failed to track changes:', error);
+          }
+
+          get().addVisitedLocation(newState.location);
+          if (newState.character?.stats.currentHp <= 0) {
             get().setDead(true);
           }
         } catch (error) {
-          const response = getDemoResponse(action);
-          const turn: GameTurn = {
-            id: uuidv4(),
-            narrative: response.narrative,
-            choices: response.choices,
-            playerAction: action,
-            timestamp: Date.now(),
-            isIntent: true,
-          };
-          
-          const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
-          
+          console.error('Player intent resolution failed:', error);
           set({
             isLoading: false,
-            isDemoMode: true,
-            gameState: {
-              ...gameState,
-              character: updatedCharacter,
-              turns: [...gameState.turns, turn],
-              currentScene: response.narrative,
-              turnCount: gameState.turnCount + 1,
-            },
+            error: (error as Error).message,
           });
-          
-          // Track visited location and check for death
-          get().addVisitedLocation(gameState.location);
-          if (updatedCharacter.stats.currentHp <= 0) {
-            get().setDead(true);
-          }
         }
       },
-      
+
       updateSettings: (newSettings: Partial<GameSettings>) => {
         set({ settings: { ...get().settings, ...newSettings } });
       },
