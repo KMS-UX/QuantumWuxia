@@ -1,3 +1,5 @@
+import type { SimulationState } from '../engine/types';
+
 export interface CharacterStats {
   strength: number;
   agility: number;
@@ -58,6 +60,8 @@ export interface GameState {
   isGameStarted: boolean;
   isGameOver: boolean;
   turnCount: number;
+  /** Authoritative Simulation Core v1 state. Optional for backward-compatible saves. */
+  simulation?: SimulationState;
 }
 
 export interface QuestEntry {
