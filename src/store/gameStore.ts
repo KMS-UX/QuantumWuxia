@@ -71,7 +71,7 @@ const defaultSettings: GameSettings = {
   theme: 'dark',
   fontSize: 'medium',
   narrativeStyle: 'detailed',
-  worldTheme: 'fantasy',
+  worldTheme: 'wuxia',
   soundEnabled: true,
   animationsEnabled: true,
 };
@@ -693,82 +693,3 @@ export const useGameStore = create<GameStore>()(
   )
 );
 
-function applyStateUpdates(character: Character, updates?: any): Character {
-  if (!updates) return character;
-  
-  let newCharacter = { ...character };
-  newCharacter.stats = { ...character.stats };
-  newCharacter.inventory = [...character.inventory];
-  newCharacter.skills = [...character.skills];
-  
-  if (updates.hpChange) {
-    newCharacter.stats.currentHp = Math.max(0, Math.min(
-      newCharacter.stats.maxHp,
-      newCharacter.stats.currentHp + updates.hpChange
-    ));
-  }
-  
-  if (updates.manaChange) {
-    newCharacter.stats.currentMana = Math.max(0, Math.min(
-      newCharacter.stats.maxMana,
-      newCharacter.stats.currentMana + updates.manaChange
-    ));
-  }
-  
-  if (updates.experienceGained) {
-    newCharacter.experience += updates.experienceGained;
-    const xpNeeded = newCharacter.level * 100;
-    if (newCharacter.experience >= xpNeeded) {
-      newCharacter.level += 1;
-      newCharacter.experience -= xpNeeded;
-      newCharacter.stats.maxHp += 5;
-      newCharacter.stats.currentHp = newCharacter.stats.maxHp;
-      newCharacter.stats.maxMana += 3;
-      newCharacter.stats.currentMana = newCharacter.stats.maxMana;
-    }
-  }
-  
-  if (updates.goldChange) {
-    newCharacter.gold = Math.max(0, newCharacter.gold + updates.goldChange);
-  }
-  
-  if (updates.itemsGained) {
-    updates.itemsGained.forEach((itemName: string) => {
-      const existing = newCharacter.inventory.find(i => i.name === itemName);
-      if (existing) {
-        existing.quantity += 1;
-      } else {
-        newCharacter.inventory.push({
-          id: uuidv4(),
-          name: itemName,
-          type: 'misc',
-          description: `A ${itemName}`,
-          quantity: 1,
-          value: 10,
-        });
-      }
-    });
-  }
-  
-  if (updates.itemsLost) {
-    updates.itemsLost.forEach((itemName: string) => {
-      const idx = newCharacter.inventory.findIndex(i => i.name === itemName);
-      if (idx !== -1) {
-        newCharacter.inventory[idx].quantity -= 1;
-        if (newCharacter.inventory[idx].quantity <= 0) {
-          newCharacter.inventory.splice(idx, 1);
-        }
-      }
-    });
-  }
-  
-  if (updates.skillsGained) {
-    updates.skillsGained.forEach((skill: string) => {
-      if (!newCharacter.skills.includes(skill)) {
-        newCharacter.skills.push(skill);
-      }
-    });
-  }
-  
-  return newCharacter;
-}
