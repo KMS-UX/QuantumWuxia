@@ -7,6 +7,7 @@ import { DEFAULT_ACHIEVEMENTS } from '../components/Achievements';
 import { JournalEntry } from '../components/Journal';
 import { database } from '../services/database';
 import { changeTracker } from '../services/changeTracker';
+import { soundManager } from '../services/soundManager';
 
 interface GameStore {
   // Game state
@@ -297,6 +298,7 @@ export const useGameStore = create<GameStore>()(
       
       makeChoice: async (choiceId: number, choiceText: string) => {
         const { gameState, settings, isDemoMode } = get();
+        soundManager.choiceConfirm();
         set({ isLoading: true, error: null });
         
         try {
@@ -392,6 +394,7 @@ export const useGameStore = create<GameStore>()(
       
       useIntent: async (action: string) => {
         const { gameState, settings, isDemoMode } = get();
+        soundManager.intentSubmit();
         set({ isLoading: true, error: null });
         
         try {
@@ -609,6 +612,11 @@ export const useGameStore = create<GameStore>()(
         
         if (changed) {
           set({ achievements: updatedAchievements });
+          // Play achievement sound for any newly unlocked achievements
+          const newlyUnlocked = updatedAchievements.filter((a, i) => a.unlocked && !achievements[i].unlocked);
+          if (newlyUnlocked.length > 0) {
+            soundManager.achievement();
+          }
         }
       },
       
@@ -680,6 +688,9 @@ export const useGameStore = create<GameStore>()(
       },
       
       setDead: (dead: boolean) => {
+        if (dead) {
+          soundManager.death();
+        }
         set({ isDead: dead });
       },
       
