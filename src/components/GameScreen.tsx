@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { Send, Swords, Scroll, User, Settings, Package, MapPin, Heart, Droplets, Coins, Star, Zap, AlertCircle, Save, BookOpen } from 'lucide-react';
+import { Send, Swords, Scroll, User, Settings, Package, MapPin, Heart, Droplets, Coins, Star, Zap, AlertCircle, Save, BookOpen, Database } from 'lucide-react';
 import SaveLoadModal from './SaveLoadModal';
 import WeatherDisplay from './WeatherSystem';
 import MiniMap from './MiniMap';
 import Journal from './Journal';
+import DatabaseManager from './DatabaseManager';
 
 export default function GameScreen() {
   const {
@@ -22,6 +23,7 @@ export default function GameScreen() {
   const [intentText, setIntentText] = useState('');
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showJournal, setShowJournal] = useState(false);
+  const [showDatabase, setShowDatabase] = useState(false);
   const narrativeEndRef = useRef<HTMLDivElement>(null);
   const character = gameState.character!;
   const lastTurn = gameState.turns[gameState.turns.length - 1];
@@ -93,6 +95,14 @@ export default function GameScreen() {
           >
             <BookOpen className="w-3 h-3" />
             <span className="hidden sm:inline">Journal</span>
+          </button>
+          <button
+            onClick={() => setShowDatabase(true)}
+            className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-2 py-1 rounded transition-all flex items-center gap-1"
+            title="Database Manager"
+          >
+            <Database className="w-3 h-3" />
+            <span className="hidden sm:inline">DB</span>
           </button>
         </div>
         <div className="flex items-center gap-3 text-sm">
@@ -439,6 +449,9 @@ export default function GameScreen() {
 
       {/* Save/Load Modal */}
       {showSaveModal && <SaveLoadModal onClose={() => setShowSaveModal(false)} />}
+
+      {/* Database Manager */}
+      {showDatabase && <DatabaseManager onClose={() => setShowDatabase(false)} />}
     </div>
   );
 }
