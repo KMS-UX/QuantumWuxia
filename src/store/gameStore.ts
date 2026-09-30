@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Character, GameState, GameSettings, GameTurn, LLMConfig, GameChoice, SaveSlot, Achievement } from '../types/game';
 import { generateNarrative, generateCharacterIntro, testConnection, LLMResponse } from '../services/llmService';
 import { DEFAULT_ACHIEVEMENTS } from '../components/Achievements';
+import { JournalEntry } from '../components/Journal';
 
 interface GameStore {
   // Game state
@@ -11,6 +12,9 @@ interface GameStore {
   settings: GameSettings;
   saveSlots: SaveSlot[];
   achievements: Achievement[];
+  journalEntries: JournalEntry[];
+  visitedLocations: string[];
+  isDead: boolean;
   
   // UI state
   isLoading: boolean;
@@ -42,6 +46,11 @@ interface GameStore {
   checkAchievements: () => void;
   autoSave: () => void;
   completeTutorial: () => void;
+  addJournalEntry: (title: string, content: string) => void;
+  deleteJournalEntry: (id: string) => void;
+  addVisitedLocation: (location: string) => void;
+  setDead: (dead: boolean) => void;
+  revive: () => void;
 }
 
 const defaultLLMConfig: LLMConfig = {
@@ -173,6 +182,9 @@ export const useGameStore = create<GameStore>()(
       settings: { ...defaultSettings },
       saveSlots: [],
       achievements: DEFAULT_ACHIEVEMENTS,
+      journalEntries: [],
+      visitedLocations: [],
+      isDead: false,
       isLoading: false,
       error: null,
       connectionStatus: 'disconnected',
@@ -293,17 +305,27 @@ export const useGameStore = create<GameStore>()(
           
           const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
           
+          const newLocation = response.stateUpdates?.locationChange || gameState.location;
+          
           set({
             gameState: {
               ...gameState,
               character: updatedCharacter,
               turns: [...gameState.turns, turn],
               currentScene: response.narrative,
-              location: response.stateUpdates?.locationChange || gameState.location,
+              location: newLocation,
               turnCount: gameState.turnCount + 1,
             },
             isLoading: false,
           });
+          
+          // Track visited location
+          get().addVisitedLocation(newLocation);
+          
+          // Check for death
+          if (updatedCharacter.stats.currentHp <= 0) {
+            get().setDead(true);
+          }
           
           // Check achievements after turn
           setTimeout(() => get().checkAchievements(), 100);
@@ -331,6 +353,12 @@ export const useGameStore = create<GameStore>()(
               turnCount: gameState.turnCount + 1,
             },
           });
+          
+          // Track visited location and check for death
+          get().addVisitedLocation(gameState.location);
+          if (updatedCharacter.stats.currentHp <= 0) {
+            get().setDead(true);
+          }
         }
       },
       
@@ -361,6 +389,7 @@ export const useGameStore = create<GameStore>()(
           };
           
           const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
+          const newLocation = response.stateUpdates?.locationChange || gameState.location;
           
           set({
             gameState: {
@@ -368,11 +397,17 @@ export const useGameStore = create<GameStore>()(
               character: updatedCharacter,
               turns: [...gameState.turns, turn],
               currentScene: response.narrative,
-              location: response.stateUpdates?.locationChange || gameState.location,
+              location: newLocation,
               turnCount: gameState.turnCount + 1,
             },
             isLoading: false,
           });
+          
+          // Track visited location and check for death
+          get().addVisitedLocation(newLocation);
+          if (updatedCharacter.stats.currentHp <= 0) {
+            get().setDead(true);
+          }
         } catch (error) {
           const response = getDemoResponse(action);
           const turn: GameTurn = {
@@ -397,6 +432,12 @@ export const useGameStore = create<GameStore>()(
               turnCount: gameState.turnCount + 1,
             },
           });
+          
+          // Track visited location and check for death
+          get().addVisitedLocation(gameState.location);
+          if (updatedCharacter.stats.currentHp <= 0) {
+            get().setDead(true);
+          }
         }
       },
       
@@ -583,6 +624,57 @@ export const useGameStore = create<GameStore>()(
       completeTutorial: () => {
         set({ tutorialCompleted: true });
       },
+      
+      addJournalEntry: (title: string, content: string) => {
+        const { journalEntries, gameState } = get();
+        const newEntry: JournalEntry = {
+          id: uuidv4(),
+          timestamp: Date.now(),
+          turnNumber: gameState.turnCount,
+          location: gameState.location,
+          type: 'manual',
+          title,
+          content,
+        };
+        set({ journalEntries: [newEntry, ...journalEntries] });
+      },
+      
+      deleteJournalEntry: (id: string) => {
+        const { journalEntries } = get();
+        set({ journalEntries: journalEntries.filter(e => e.id !== id) });
+      },
+      
+      addVisitedLocation: (location: string) => {
+        const { visitedLocations } = get();
+        if (!visitedLocations.includes(location)) {
+          set({ visitedLocations: [...visitedLocations, location] });
+        }
+      },
+      
+      setDead: (dead: boolean) => {
+        set({ isDead: dead });
+      },
+      
+      revive: () => {
+        const { gameState } = get();
+        if (gameState.character) {
+          const updatedCharacter = {
+            ...gameState.character,
+            stats: {
+              ...gameState.character.stats,
+              currentHp: Math.floor(gameState.character.stats.maxHp / 2),
+            },
+            gold: Math.floor(gameState.character.gold / 2),
+          };
+          set({
+            isDead: false,
+            gameState: {
+              ...gameState,
+              character: updatedCharacter,
+            },
+          });
+        }
+      },
     }),
     {
       name: 'rpg-game-storage',
@@ -591,6 +683,8 @@ export const useGameStore = create<GameStore>()(
         settings: state.settings,
         saveSlots: state.saveSlots,
         achievements: state.achievements,
+        journalEntries: state.journalEntries,
+        visitedLocations: state.visitedLocations,
         tutorialCompleted: state.tutorialCompleted,
       }),
     }

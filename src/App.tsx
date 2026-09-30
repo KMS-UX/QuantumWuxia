@@ -7,6 +7,9 @@ import WelcomeScreen from './components/WelcomeScreen';
 import Tutorial from './components/Tutorial';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
 import AutoSaveIndicator from './components/AutoSaveIndicator';
+import NotificationContainer from './components/NotificationSystem';
+import DeathScreen from './components/DeathScreen';
+import CommandPalette, { useCommandPalette } from './components/CommandPalette';
 import { Settings } from 'lucide-react';
 
 type AppView = 'welcome' | 'character-creation' | 'game' | 'settings';
@@ -102,6 +105,18 @@ export default function App() {
   }
 
   // Game screen
+  const { isOpen: isCommandPaletteOpen, open: openCommandPalette, close: closeCommandPalette } = useCommandPalette();
+  const { isDead, gameState: currentGameState, resetGame, revive, saveSlots } = useGameStore();
+
+  const commandPaletteCommands = [
+    { id: 'save', label: 'Save Game', icon: '💾', category: 'Game', description: 'Save your current progress', action: () => {} },
+    { id: 'settings', label: 'Open Settings', icon: '⚙️', category: 'Game', description: 'Configure AI and preferences', action: () => setActiveTab('settings') },
+    { id: 'character', label: 'View Character', icon: '🧙', category: 'Game', description: 'View your character sheet', action: () => setActiveTab('character') },
+    { id: 'inventory', label: 'View Inventory', icon: '🎒', category: 'Game', description: 'Check your items', action: () => setActiveTab('inventory') },
+    { id: 'quests', label: 'View Quests', icon: '📋', category: 'Game', description: 'Check your quest log', action: () => setActiveTab('quests') },
+    { id: 'new-game', label: 'New Game', icon: '🎮', category: 'Game', description: 'Start a new adventure', action: () => resetGame() },
+  ];
+
   return (
     <div className="relative h-screen">
       {/* Tutorial */}
@@ -120,6 +135,39 @@ export default function App() {
 
       {/* Auto-save indicator */}
       <AutoSaveIndicator lastSaved={lastAutoSave} isSaving={isAutoSaving} />
+
+      {/* Notifications */}
+      <NotificationContainer />
+
+      {/* Death Screen */}
+      {isDead && currentGameState.character && (
+        <DeathScreen
+          characterName={currentGameState.character.name}
+          level={currentGameState.character.level}
+          turnsSurvived={currentGameState.turnCount}
+          hasSaves={saveSlots.length > 0}
+          onRespawn={(option) => {
+            if (option === 'continue') {
+              revive();
+            } else if (option === 'loadSave') {
+              // Load the most recent save
+              if (saveSlots.length > 0) {
+                const latestSave = saveSlots.sort((a, b) => b.timestamp - a.timestamp)[0];
+                useGameStore.getState().loadGame(latestSave.id);
+              }
+            } else if (option === 'newGame') {
+              resetGame();
+            }
+          }}
+        />
+      )}
+
+      {/* Command Palette */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={closeCommandPalette}
+        commands={commandPaletteCommands}
+      />
 
       {/* Keyboard shortcuts help */}
       <KeyboardShortcuts />
