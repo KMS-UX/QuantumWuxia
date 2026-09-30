@@ -660,19 +660,30 @@ export const useGameStore = create<GameStore>()(
       revive: () => {
         const { gameState } = get();
         if (gameState.character) {
+          const revivedHp = Math.floor(gameState.character.stats.maxHp / 2);
           const updatedCharacter = {
             ...gameState.character,
             stats: {
               ...gameState.character.stats,
-              currentHp: Math.floor(gameState.character.stats.maxHp / 2),
+              currentHp: revivedHp,
             },
             gold: Math.floor(gameState.character.gold / 2),
           };
+          const simulation = gameState.simulation
+            ? {
+                ...gameState.simulation,
+                character: {
+                  ...gameState.simulation.character,
+                  hp: Math.min(gameState.simulation.character.maxHp, revivedHp),
+                },
+              }
+            : undefined;
           set({
             isDead: false,
             gameState: {
               ...gameState,
               character: updatedCharacter,
+              ...(simulation ? { simulation } : {}),
             },
           });
         }
