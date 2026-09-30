@@ -78,7 +78,23 @@ export function mergeSimulationState(gameState: GameState, simulation: Simulatio
 
 export function ensureSimulationState(gameState: GameState, knownLocationIds: string[] = []): SimulationState {
   if (gameState.simulation && validateState(gameState.simulation).length === 0) {
-    return createSimulationState({ ...gameState, simulation: gameState.simulation }, knownLocationIds);
+    return {
+      schemaVersion: 1,
+      character: {
+        ...gameState.simulation.character,
+        attributes: { ...gameState.simulation.character.attributes },
+        conditions: gameState.simulation.character.conditions.map(condition => ({ ...condition })),
+        inventory: [...gameState.simulation.character.inventory],
+      },
+      world: {
+        ...gameState.simulation.world,
+        locationIds: Array.from(new Set([
+          ...gameState.simulation.world.locationIds,
+          ...knownLocationIds.filter(Boolean),
+        ])),
+        knownFacts: [...gameState.simulation.world.knownFacts],
+      },
+    };
   }
   return createSimulationState(gameState, knownLocationIds);
 }
