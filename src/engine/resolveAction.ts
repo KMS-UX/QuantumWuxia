@@ -265,11 +265,6 @@ export function resolveAction(
     throw new Error(`Resolver produced invalid state: ${finalIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
   }
 
-  const finalIssues = validateState(state);
-  if (finalIssues.length > 0) {
-    throw new Error(`Resolver produced invalid state: ${finalIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
-  }
-
   return {
     status,
     summary: summaries[status],
