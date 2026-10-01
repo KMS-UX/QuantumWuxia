@@ -45,6 +45,21 @@ function inferGoal(text: string): string | undefined {
   return match?.[1]?.trim();
 }
 
+function inferConditionalClauses(text: string): string[] | undefined {
+  const clauses = Array.from(text.matchAll(/\bif\s+(.+?)(?=\s+(?:then|and|but)\b|$)/gi))
+    .map(match => match[1]?.trim())
+    .filter((clause): clause is string => Boolean(clause));
+  return clauses.length > 0 ? clauses : undefined;
+}
+
+function inferDeclaredConstraints(text: string): string[] | undefined {
+  const clauses = [
+    ...Array.from(text.matchAll(/\b(only if\s+.+?)(?=\s+(?:then|and|but)\b|$)/gi)).map(match => match[1]?.trim()),
+    ...Array.from(text.matchAll(/\b(without\s+.+?)(?=\s+(?:then|and|but)\b|$)/gi)).map(match => match[1]?.trim()),
+  ].filter((clause): clause is string => Boolean(clause));
+  return clauses.length > 0 ? clauses : undefined;
+}
+
 export function interpretPlayerAction(
   description: string,
   simulation: SimulationState,
@@ -62,6 +77,8 @@ export function interpretPlayerAction(
   const approach = inferApproach(lower);
   const techniqueId = kind === 'attack' || kind === 'meditate' ? inferTechnique(lower) : undefined;
   const intendedGoal = inferGoal(normalized);
+  const conditionalClauses = inferConditionalClauses(lower);
+  const declaredConstraints = inferDeclaredConstraints(lower);
 
   return {
     kind,
@@ -74,5 +91,7 @@ export function interpretPlayerAction(
     ...(approach ? { approach } : {}),
     ...(techniqueId ? { techniqueId } : {}),
     ...(intendedGoal ? { intendedGoal } : {}),
+    ...(conditionalClauses ? { conditionalClauses } : {}),
+    ...(declaredConstraints ? { declaredConstraints } : {}),
   };
 }

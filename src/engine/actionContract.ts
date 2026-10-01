@@ -5,6 +5,94 @@ export type ActionContractIssue = {
   message: string;
 };
 
+export type ActionContractPrecondition = {
+  source: 'conditional' | 'constraint';
+  expression: string;
+};
+
+function normalizeExpression(expression: string): string {
+  return expression.trim().replace(/\s+/g, ' ');
+}
+
+function extractPreconditions(action: ProposedAction): ActionContractPrecondition[] {
+  return [
+    ...(action.conditionalClauses ?? []).map(expression => ({
+      source: 'conditional' as const,
+      expression: normalizeExpression(expression),
+    })),
+    ...(action.declaredConstraints ?? []).map(expression => ({
+      source: 'constraint' as const,
+      expression: normalizeExpression(expression),
+    })),
+  ].filter(precondition => precondition.expression.length > 0);
+}
+
+/**
+ * Supported deterministic preconditions intentionally use a tiny vocabulary:
+ * - only if qi >= N
+ * - only if carrying ITEM
+ * - only if at LOCATION
+ * - without ITEM
+ *
+ * Other natural-language clauses remain descriptive metadata and are not
+ * silently promoted into game rules.
+ */
+function evaluatePrecondition(
+  state: SimulationState,
+  precondition: ActionContractPrecondition,
+): ActionContractIssue | undefined {
+  const expression = precondition.expression;
+
+  let match = expression.match(/^(?:only if\s+)?qi\s*(?:>=|at least)\s*(\d+)$/i);
+  if (match) {
+    const requiredQi = Number(match[1]);
+    if (state.character.qi < requiredQi) {
+      return {
+        path: precondition.source === 'conditional' ? 'conditionalClauses' : 'declaredConstraints',
+        message: `Precondition failed: requires at least ${requiredQi} Qi.`,
+      };
+    }
+    return undefined;
+  }
+
+  match = expression.match(/^(?:only if\s+)?carrying\s+(.+)$/i);
+  if (match) {
+    const itemId = match[1].trim();
+    if (!state.character.inventory.includes(itemId)) {
+      return {
+        path: precondition.source === 'conditional' ? 'conditionalClauses' : 'declaredConstraints',
+        message: `Precondition failed: item "${itemId}" is required.`,
+      };
+    }
+    return undefined;
+  }
+
+  match = expression.match(/^(?:only if\s+)?at\s+(.+)$/i);
+  if (match) {
+    const locationId = match[1].trim();
+    if (state.character.locationId !== locationId) {
+      return {
+        path: precondition.source === 'conditional' ? 'conditionalClauses' : 'declaredConstraints',
+        message: `Precondition failed: actor must be at "${locationId}".`,
+      };
+    }
+    return undefined;
+  }
+
+  match = expression.match(/^without\s+(.+)$/i);
+  if (match) {
+    const itemId = match[1].trim();
+    if (state.character.inventory.includes(itemId)) {
+      return {
+        path: precondition.source === 'conditional' ? 'conditionalClauses' : 'declaredConstraints',
+        message: `Precondition failed: item "${itemId}" must not be carried.`,
+      };
+    }
+  }
+
+  return undefined;
+}
+
 export function normalizeProposedAction(
   state: SimulationState,
   action: ProposedAction,
@@ -82,6 +170,12 @@ export function validateProposedAction(
       });
     }
   }
+
+  issues.push(
+    ...extractPreconditions(action)
+      .map(precondition => evaluatePrecondition(state, precondition))
+      .filter((issue): issue is ActionContractIssue => issue !== undefined),
+  );
 
   if (action.qiCost !== undefined && (!Number.isFinite(action.qiCost) || action.qiCost < 0)) {
     issues.push({ path: 'qiCost', message: 'Qi cost must be a finite non-negative number.' });

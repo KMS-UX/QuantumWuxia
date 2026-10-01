@@ -160,16 +160,16 @@ The current `ProposedAction` is intentionally small. Expand it only after the bo
 Target fields:
 
 - [x] action kind;
-- actor;
-- target;
-- destination;
-- approach;
-- tool/weapon;
-- technique;
-- intended goal;
-- player risk posture;
-- conditional clauses;
-- declared constraints.
+- [x] actor;
+- [x] target;
+- [x] destination;
+- [x] approach;
+- [x] tool/weapon;
+- [x] technique;
+- [x] intended goal;
+- [x] player risk posture;
+- [x] conditional clauses;
+- [x] declared constraints.
 
 Important distinction:
 
