@@ -54,7 +54,7 @@ export interface SimCharacter {
 export interface SimWorld {
   turn: number;
   locationIds: string[];
-  knownFacts: string[];
+  knownFacts: string[];\n  /** Player-known information only; world truth remains in jianghu. */\n  knownRumorIds?: string[];\n  knownNpcIds?: string[];
 }
 
 export interface SimulationState {
@@ -83,7 +83,7 @@ export interface StateEvent {
     | 'character.injury_added'
     | 'character.social_changed'
     | 'world.location_changed'
-    | 'world.fact_discovered'\n    | 'world.relationship_changed'\n    | 'world.npc_memory_added'\n    | 'world.jianghu_ticked';
+    | 'world.fact_discovered'\n    | 'world.relationship_changed'\n    | 'world.npc_memory_added'\n    | 'world.jianghu_ticked'\n    | 'world.rumor_spread'\n    | 'world.npc_goal_completed';
   payload: Record<string, string | number | boolean | null>;
 }
 

@@ -1,7 +1,7 @@
 import type { ProposedAction, SimulationState, StateEvent } from './types';
 
 export type MemoryValence = 'positive' | 'negative' | 'neutral';
-export type RumorStatus = 'unverified' | 'plausible' | 'confirmed' | 'false';
+export type RumorStatus = 'unverified' | 'plausible' | 'confirmed' | 'false';\nexport type GoalKind = 'travel' | 'trade' | 'investigate' | 'protect' | 'collect_debt' | 'train' | 'social' | 'rest';
 
 export interface NPCMemory {
   id: string;
@@ -12,14 +12,14 @@ export interface NPCMemory {
   turn: number;
 }
 
-export interface NPCState {
+export interface NPCGoal {\n  id: string;\n  kind: GoalKind;\n  description: string;\n  targetId?: string;\n  priority: number;\n  progress: number;\n  active: boolean;\n}\n\nexport interface NPCState {
   id: string;
   name: string;
   role: string;
   locationId: string;
   factionId?: string;
   disposition: number;
-  goals: string[];
+  goals: NPCGoal[];
   fears: string[];
   secrets: string[];
   skills: string[];
@@ -99,7 +99,7 @@ export interface JianghuState {
   relationships: RelationshipState[];
   rumors: RumorState[];
   obligations: ObligationState[];
-  worldEvents: WorldEventState[];
+  worldEvents: WorldEventState[];\n  knowledgeVersion: number;
 }
 
 export const DEFAULT_JIANGHU: JianghuState = {
@@ -111,9 +111,9 @@ export const DEFAULT_JIANGHU: JianghuState = {
       role: 'tea house keeper',
       locationId: 'The Crossroads',
       disposition: 0,
-      goals: ['keep the tea house open', 'avoid sect trouble'],
+      goals: [{ id: 'goal-tea-open', kind: 'rest', description: 'Keep the tea house open', priority: 80, progress: 0, active: true }, { id: 'goal-avoid-trouble', kind: 'protect', description: 'Avoid sect trouble', priority: 70, progress: 0, active: true }],
       fears: ['bandits', 'war between sects'],
-      secrets: [],
+      secrets: [],\n      factionId: 'faction-jade-hall',
       skills: ['tea', 'local gossip', 'basic first aid'],
       resources: 20,
       memories: [],
@@ -125,7 +125,7 @@ export const DEFAULT_JIANGHU: JianghuState = {
       role: 'wandering martial artist',
       locationId: 'The Crossroads',
       disposition: 0,
-      goals: ['find worthy opponents', 'repay an old debt'],
+      goals: [{ id: 'goal-worthy-opponent', kind: 'train', description: 'Find a worthy opponent', priority: 70, progress: 0, active: true }, { id: 'goal-repay-debt', kind: 'collect_debt', description: 'Repay an old debt', priority: 90, progress: 0, active: true }],
       fears: ['dishonor', 'betrayal'],
       secrets: [],
       skills: ['swordsmanship', 'tracking'],
@@ -168,12 +168,13 @@ export const DEFAULT_JIANGHU: JianghuState = {
   rumors: [],
   obligations: [],
   worldEvents: [],
+  knowledgeVersion: 1,
 };
 
 function cloneJianghu(j: JianghuState): JianghuState {
   return {
     schemaVersion: 1,
-    npcs: j.npcs.map(n => ({ ...n, goals: [...n.goals], fears: [...n.fears], secrets: [...n.secrets], skills: [...n.skills], memories: n.memories.map(m => ({ ...m })) })),
+    npcs: j.npcs.map(n => ({ ...n, goals: n.goals.map(goal => ({ ...goal })), fears: [...n.fears], secrets: [...n.secrets], skills: [...n.skills], memories: n.memories.map(m => ({ ...m })) })),
     factions: j.factions.map(f => ({ ...f, territory: [...f.territory], goals: [...f.goals], allies: [...f.allies], enemies: [...f.enemies] })),
     relationships: j.relationships.map(r => ({ ...r })),
     rumors: j.rumors.map(r => ({ ...r, knownBy: [...r.knownBy] })),
@@ -240,7 +241,7 @@ export function applyJianghuAction(
         confidence: 60,
         turn,
       });
-      npc.disposition = clamp(npc.disposition + delta, -100, 100);
+      npc.disposition = clamp(npc.disposition + delta, -100, 100);\n      if (npc.factionId) {\n        const faction = jianghu.factions.find(f => f.id === npc.factionId);\n        if (faction) faction.playerReputation = clamp(faction.playerReputation + 1, -100, 100);\n      }
       events.push({
         type: 'world.relationship_changed',
         payload: { subjectId: simulation.character.id, targetId: npc.id, trust: relationship.trust, respect: relationship.respect },
@@ -259,7 +260,7 @@ export function applyJianghuAction(
       relationship.grudge = clamp(relationship.grudge + 5, 0, 100);
       relationship.trust = clamp(relationship.trust - 10, -100, 100);
       relationship.fear = clamp(relationship.fear + 3, 0, 100);
-      npc.disposition = clamp(npc.disposition - 5, -100, 100);
+      npc.disposition = clamp(npc.disposition - 5, -100, 100);\n      if (npc.factionId) {\n        const faction = jianghu.factions.find(f => f.id === npc.factionId);\n        if (faction) faction.playerReputation = clamp(faction.playerReputation - 5, -100, 100);\n      }
       npc.memories.push({
         id: `memory-${npc.id}-${turn}`,
         event: `Was attacked by ${simulation.character.name}`,
@@ -278,6 +279,62 @@ export function applyJianghuAction(
   return { jianghu, events };
 }
 
+export function createRumor(
+  input: JianghuState,
+  text: string,
+  origin: string,
+  locationId: string,
+  turn: number,
+  credibility = 50,
+): JianghuState {
+  const jianghu = cloneJianghu(input);
+  jianghu.rumors.push({
+    id: `rumor-${turn}-${jianghu.rumors.length + 1}`,
+    text,
+    origin,
+    currentLocationId: locationId,
+    status: 'unverified',
+    credibility: clamp(credibility, 0, 100),
+    knownBy: [origin],
+    createdTurn: turn,
+    spreadRate: 1,
+  });
+  jianghu.knowledgeVersion += 1;
+  return jianghu;
+}
+
+function propagateRumors(jianghu: JianghuState, simulation: SimulationState, events: StateEvent[]): void {
+  const localNpcs = jianghu.npcs.filter(npc => npc.alive && npc.locationId === simulation.character.locationId);
+  for (const rumor of jianghu.rumors) {
+    if (rumor.currentLocationId !== simulation.character.locationId) continue;
+    for (const npc of localNpcs) {
+      if (rumor.knownBy.includes(npc.id)) continue;
+      if ((rumor.credibility + npc.disposition) < 45) continue;
+      rumor.knownBy.push(npc.id);
+      if (rumor.status === 'unverified' && rumor.credibility >= 60) rumor.status = 'plausible';
+      events.push({ type: 'world.rumor_spread', payload: { rumorId: rumor.id, npcId: npc.id } });
+    }
+    if (rumor.knownBy.includes(simulation.character.id)) {
+      simulation.world.knownRumorIds = Array.from(new Set([...(simulation.world.knownRumorIds ?? []), rumor.id]));
+    }
+  }
+}
+
+function advanceNpcGoals(jianghu: JianghuState, simulation: SimulationState, events: StateEvent[]): void {
+  for (const npc of jianghu.npcs) {
+    if (!npc.alive) continue;
+    const goal = npc.goals.filter(g => g.active).sort((a, b) => b.priority - a.priority)[0];
+    if (!goal) continue;
+    if (goal.kind === 'travel' && goal.targetId && npc.locationId === goal.targetId) goal.progress = 100;
+    else if (goal.kind === 'protect' && npc.locationId === simulation.character.locationId) goal.progress = clamp(goal.progress + 2, 0, 100);
+    else goal.progress = clamp(goal.progress + 1, 0, 100);
+    if (goal.progress >= 100) {
+      goal.active = false;
+      events.push({ type: 'world.npc_goal_completed', payload: { npcId: npc.id, goalId: goal.id } });
+    }
+  }
+}
+
 export function tickJianghu(
   input: JianghuState,
   simulation: SimulationState,
@@ -286,7 +343,7 @@ export function tickJianghu(
   const events: StateEvent[] = [];
   const turn = simulation.world.turn;
 
-  for (const faction of jianghu.factions) {
+  advanceNpcGoals(jianghu, simulation, events);\n  propagateRumors(jianghu, simulation, events);\n\n  for (const faction of jianghu.factions) {
     const drift = faction.internalTension > 70 ? -1 : faction.resources < 20 ? -1 : 0;
     faction.resources = clamp(faction.resources + drift, 0, 100);
     faction.internalTension = clamp(faction.internalTension + (faction.resources < 15 ? 1 : -1), 0, 100);
