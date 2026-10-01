@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { GameState } from '../../src/types/game';
 import type { ProposedAction, SimulationState } from '../../src/engine/types';
 import { enterSimulationBoundary, exitSimulationBoundary } from '../../src/engine/simulationBoundary';
+import { createSimulationState, ensureSimulationState, mergeSimulationState } from '../../src/engine/simulationAdapter';
 import { resolveAction } from '../../src/engine/resolveAction';
 import { resolvePlayerAction } from '../../src/engine/actionPipeline';
 
@@ -187,4 +188,49 @@ test('player action pipeline crosses the canonical boundary and returns compatib
   assert.equal(result.nextGameState.character?.stats.currentHp, 85);
   assert.ok(result.nextGameState.simulation);
   assert.equal(result.nextGameState.simulation?.character.hp, 85);
+});
+
+
+test('existing canonical simulation attributes and Qi survive compatibility round-trip', () => {
+  const gameState = makeGameState();
+  gameState.simulation = makeSimulation();
+  gameState.simulation.character.attributes.constitution = 27;
+  gameState.simulation.character.attributes.perception = 31;
+  gameState.simulation.character.qi = 17;
+  gameState.simulation.character.maxQi = 60;
+
+  const simulation = ensureSimulationState(gameState);
+
+  assert.equal(simulation.character.attributes.constitution, 27);
+  assert.equal(simulation.character.attributes.perception, 31);
+  assert.equal(simulation.character.qi, 17);
+  assert.equal(simulation.character.maxQi, 60);
+
+  const next = mergeSimulationState(gameState, simulation);
+  assert.equal(next.simulation?.character.attributes.constitution, 27);
+  assert.equal(next.simulation?.character.attributes.perception, 31);
+  assert.equal(next.simulation?.character.qi, 17);
+  assert.equal(next.character?.stats.currentMana, 17);
+  assert.equal(next.character?.stats.maxMana, 60);
+});
+
+test('legacy migration uses documented compatibility mappings only when no simulation state exists', () => {
+  const gameState = makeGameState();
+  const simulation = createSimulationState(gameState);
+
+  assert.equal(simulation.character.attributes.constitution, gameState.character?.stats.strength);
+  assert.equal(simulation.character.attributes.perception, gameState.character?.stats.agility);
+  assert.equal(simulation.character.qi, gameState.character?.stats.currentMana);
+  assert.equal(simulation.character.maxQi, gameState.character?.stats.maxMana);
+});
+
+test('invalid existing simulation state never falls back to legacy semantic mappings', () => {
+  const gameState = makeGameState();
+  gameState.simulation = makeSimulation();
+  gameState.simulation.character.attributes.constitution = -1;
+
+  assert.throws(
+    () => ensureSimulationState(gameState),
+    /refusing to fall back to legacy GameState mappings/,
+  );
 });

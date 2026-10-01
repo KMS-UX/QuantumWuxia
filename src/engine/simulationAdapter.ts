@@ -1,78 +1,20 @@
 import type { GameState } from '../types/game';
 import type { SimulationState } from './types';
 import { validateState } from './validateState';
-import { createDefaultWuxiaCharacter } from './wuxia';
-import { createDefaultJianghu } from './jianghu';
+import { migrateLegacyGameState } from './simulationMigration';
 
 /** Transitional bridge from the legacy UI/save model to the authoritative simulation state. */
 export function createSimulationState(gameState: GameState, knownLocationIds: string[] = []): SimulationState {
   if (!gameState.character) throw new Error('Cannot create a simulation state without a character.');
 
   const locationId = gameState.location.trim() || 'unknown';
-  const locationIds = Array.from(new Set([locationId, ...knownLocationIds.filter(Boolean)]));
-  const character = gameState.character;
-  const maxQi = Math.max(0, character.stats.maxMana);
-  const legacyWuxia = gameState.simulation?.character.wuxia;
-
-  return {
-    schemaVersion: 1,
-    jianghu: gameState.simulation?.jianghu
-      ? JSON.parse(JSON.stringify(gameState.simulation.jianghu))
-      : createDefaultJianghu(locationId),
-    character: {
-      id: character.id,
-      name: character.name,
-      hp: character.stats.currentHp,
-      maxHp: character.stats.maxHp,
-      qi: Math.max(0, Math.min(maxQi, character.stats.currentMana)),
-      maxQi,
-      fatigue: gameState.simulation?.character.fatigue ?? 0,
-      attributes: {
-        strength: character.stats.strength,
-        agility: character.stats.agility,
-        constitution: character.stats.strength,
-        perception: character.stats.agility,
-        intelligence: character.stats.intelligence,
-        charisma: character.stats.charisma,
-        luck: character.stats.luck,
-      },
-      conditions: gameState.simulation?.character.conditions.map(condition => ({ ...condition })) ?? [],
-      inventory: character.inventory.flatMap(item => Array(Math.max(0, item.quantity)).fill(item.id)),
-      locationId,
-      wuxia: legacyWuxia
-        ? JSON.parse(JSON.stringify(legacyWuxia))
-        : createDefaultWuxiaCharacter({
-            id: character.id,
-            name: character.name,
-            hp: character.stats.currentHp,
-            maxHp: character.stats.maxHp,
-            qi: Math.max(0, Math.min(maxQi, character.stats.currentMana)),
-            maxQi,
-            fatigue: 0,
-            attributes: {
-              strength: character.stats.strength,
-              agility: character.stats.agility,
-              constitution: character.stats.strength,
-              perception: character.stats.agility,
-              intelligence: character.stats.intelligence,
-              charisma: character.stats.charisma,
-              luck: character.stats.luck,
-            },
-            conditions: [],
-            inventory: [],
-            locationId,
-          }).wuxia,
-    },
-    world: {
-      turn: gameState.turnCount,
-      locationIds,
-      knownFacts: gameState.simulation?.world.knownFacts ? [...gameState.simulation.world.knownFacts] : [],
-      knownRumorIds: [...(gameState.simulation?.world.knownRumorIds ?? [])],
-      knownNpcIds: [...(gameState.simulation?.world.knownNpcIds ?? [])],
-    },
-  };
+  return migrateLegacyGameState(
+    gameState.character,
+    locationId,
+    gameState.turnCount,
+    knownLocationIds,
+  );
 }
-
 function cloneSimulation(simulation: SimulationState): SimulationState {
   return {
     schemaVersion: 1,
@@ -127,7 +69,16 @@ export function mergeSimulationState(gameState: GameState, simulation: Simulatio
 }
 
 export function ensureSimulationState(gameState: GameState, knownLocationIds: string[] = []): SimulationState {
-  if (gameState.simulation && validateState(gameState.simulation).length === 0) {
+  if (gameState.simulation) {
+    const issues = validateState(gameState.simulation);
+    if (issues.length > 0) {
+      throw new Error(
+        `Existing SimulationState is invalid; refusing to fall back to legacy GameState mappings: ${issues
+          .map(issue => `${issue.path}: ${issue.message}`)
+          .join('; ')}`,
+      );
+    }
+
     const simulation = cloneSimulation(gameState.simulation);
     simulation.world.locationIds = Array.from(new Set([
       ...simulation.world.locationIds,
