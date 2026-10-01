@@ -90,7 +90,14 @@ function buildContextPrompt(state: GameState, playerAction: string): string {
     context += `- Qi: ${simulation.character.qi}/${simulation.character.maxQi}\n`;
     context += `- Fatigue: ${simulation.character.fatigue}/100\n`;
     context += `- Conditions: ${simulation.character.conditions.map(c => c.id).join(', ') || 'None'}\n`;
-    context += `- Known facts: ${simulation.world.knownFacts.join(', ') || 'None'}\n\n`;
+    context += `- Known facts: ${simulation.world.knownFacts.join(', ') || 'None'}\n\n`;    if (simulation.character.wuxia) {
+      const wuxia = simulation.character.wuxia;
+      context += `- Cultivation: ${wuxia.cultivation.stage}, Qi control ${wuxia.cultivation.qiControl}/100, meridian integrity ${wuxia.cultivation.meridianIntegrity}/100\n`;
+      context += `- Martial arts: ${wuxia.martialArts.map(art => `${art.name} (mastery ${art.mastery})`).join(', ') || 'None'}\n`;
+      context += `- Injuries: ${wuxia.injuries.map(injury => `${injury.id} severity ${injury.severity}`).join(', ') || 'None'}\n`;
+      context += `- Social: reputation ${wuxia.social.reputation}, Face ${wuxia.social.face}, trust ${wuxia.social.trust}, fear ${wuxia.social.fear}\n`;
+    }
+
   }
 
   // Recent history (last 5 turns)
