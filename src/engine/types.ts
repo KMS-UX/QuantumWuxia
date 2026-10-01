@@ -91,6 +91,11 @@ export interface ProposedAction {
 }
 
 export interface StateEvent {
+  /** Explicit deterministic provenance for downstream ledger consumers. */
+  causes?: string[];
+  witnesses?: string[];
+  knowledgeConsequences?: string[];
+  causalLinks?: string[];
   type:
     | 'action.resolved'
     | 'character.hp_changed'

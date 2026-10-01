@@ -83,7 +83,7 @@ export function processInformation(
         trueState: 'unknown',
       });
       j.knowledgeVersion += 1;
-      events.push({ type: 'world.fact_discovered', payload: { fact: rumor.text, source: rumor.id, confidence: rumor.credibility } });
+      events.push({ type: 'world.fact_discovered', causes: [`rumor:${rumor.id}:transmission`], witnesses: [simulation.character.id], knowledgeConsequences: [`player:fact:${rumor.text}`], causalLinks: [rumor.id], payload: { fact: rumor.text, source: rumor.id, confidence: rumor.credibility } });
     }
     simulation.world.knownRumorIds = Array.from(new Set([...(simulation.world.knownRumorIds ?? []), rumor.id]));
   }
@@ -100,7 +100,7 @@ export function processInformation(
         j.knowledgeRecords.push({ ...source, subjectId: playerId, id: `knowledge-secret-${npc.id}-${turn}`, discoveredTurn: turn });
         j.knowledgeVersion += 1;
         simulation.world.knownNpcIds = Array.from(new Set([...(simulation.world.knownNpcIds ?? []), npc.id]));
-        events.push({ type: 'world.fact_discovered', payload: { fact: source.fact, source: npc.id, confidence: source.confidence } });
+        events.push({ type: 'world.fact_discovered', causes: [`npc:${npc.id}:knowledge-source`], witnesses: [simulation.character.id, npc.id], knowledgeConsequences: [`player:fact:${source.fact}`], causalLinks: [source.id], payload: { fact: source.fact, source: npc.id, confidence: source.confidence } });
       }
     }
   }
@@ -171,14 +171,14 @@ export function advanceCausalChains(
 
     events.push({
       type: 'world.causal_chain_advanced',
-      payload: { chainId: chain.id, rootEventId: chain.rootEventId, step: chain.step, kind: chain.kind },
+      causes: [`causal-chain:${chain.id}`, `root-event:${chain.rootEventId}`], causalLinks: [chain.rootEventId], payload: { chainId: chain.id, rootEventId: chain.rootEventId, step: chain.step, kind: chain.kind },
     });
 
     if (chain.step >= 3 || !worldEvent.active) {
       chain.active = false;
       events.push({
         type: 'world.causal_chain_completed',
-        payload: { chainId: chain.id, rootEventId: chain.rootEventId },
+        causes: [`causal-chain:${chain.id}:completion`, `root-event:${chain.rootEventId}`], causalLinks: [chain.rootEventId], payload: { chainId: chain.id, rootEventId: chain.rootEventId },
       });
     }
   }

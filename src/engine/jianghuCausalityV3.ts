@@ -48,7 +48,7 @@ function advanceObligations(j: JianghuState, simulation: SimulationState, events
       const debtorToCreditor = relation(j, o.debtorId, o.creditorId, simulation.world.turn);
       debtorToCreditor.trust = clamp(debtorToCreditor.trust - Math.max(1, o.severity));
       debtorToCreditor.grudge = clamp(debtorToCreditor.grudge + Math.max(1, Math.floor(o.severity / 2)), 0, 100);
-      events.push({ type: 'world.obligation_changed', payload: { obligationId: o.id, status: 'overdue', debtorId: o.debtorId, creditorId: o.creditorId } });
+      events.push({ type: 'world.obligation_changed', causes: [`obligation:${o.id}`, `turn:${simulation.world.turn}:deadline`], witnesses: [o.debtorId, o.creditorId], knowledgeConsequences: [`obligation:${o.id}:overdue`], payload: { obligationId: o.id, status: 'overdue', debtorId: o.debtorId, creditorId: o.creditorId } });
       o.dueTurn = simulation.world.turn + 3;
     }
   }
@@ -65,7 +65,7 @@ function buildNpcRelations(j: JianghuState, simulation: SimulationState, events:
       const r = relation(j, a.id, b.id, simulation.world.turn);
       r.trust = sameFaction ? 5 : 0;
       r.respect = sameFaction ? 3 : 0;
-      events.push({ type: 'world.relationship_changed', payload: { subjectId: a.id, targetId: b.id, trust: r.trust, respect: r.respect } });
+      events.push({ type: 'world.relationship_changed', causes: [`faction:${a.factionId ?? 'none'}:relation-tick`, `faction:${b.factionId ?? 'none'}:relation-tick`], witnesses: [a.id, b.id], payload: { subjectId: a.id, targetId: b.id, trust: r.trust, respect: r.respect } });
     }
   }
 }
@@ -82,7 +82,7 @@ function applyFactionPressure(j: JianghuState, simulation: SimulationState, even
       const id = `event-faction-conflict-${simulation.world.turn}-${rel.id}`;
       if (!j.worldEvents.some(e => e.id === id)) {
         j.worldEvents.push({ id, kind: 'conflict', title: `${a.name} and ${b.name} tensions erupt`, description: 'Faction hostility has created a local conflict that can alter travel, trade, and NPC goals.', factionIds: [a.id, b.id], severity: Math.min(5, Math.ceil(rel.hostility / 20)), active: true, createdTurn: simulation.world.turn, expiresTurn: simulation.world.turn + 5 });
-        events.push({ type: 'world.faction_conflict', payload: { eventId: id, factionAId: a.id, factionBId: b.id } });
+        events.push({ type: 'world.faction_conflict', causes: [`faction:${a.id}:hostility`, `faction:${b.id}:hostility`], witnesses: [a.id, b.id], causalLinks: [id], payload: { eventId: id, factionAId: a.id, factionBId: b.id } });
       }
     }
   }
@@ -136,7 +136,7 @@ function autonomousNpcActions(j: JianghuState, simulation: SimulationState, even
     }
     if (acted) {
       budget--;
-      events.push({ type: 'world.npc_action', payload: { npcId: npc.id, goalId: goal.id, kind: goal.kind, turn: simulation.world.turn } });
+      events.push({ type: 'world.npc_action', causes: [`npc:${npc.id}:goal:${goal.id}`, `npc:${npc.id}:opportunity`], witnesses: [npc.id], payload: { npcId: npc.id, goalId: goal.id, kind: goal.kind, turn: simulation.world.turn } });
     }
   }
 }
@@ -150,7 +150,7 @@ export function applyCausalityV3(input: JianghuState, simulation: SimulationStat
   autonomousNpcActions(j, simulation, events);
   const market = ensureMarket(j, simulation.character.locationId, simulation.world.turn);
   updateMarket(market, simulation.world.turn);
-  events.push({ type: 'world.market_changed', payload: { locationId: market.locationId, turn: market.lastUpdatedTurn } });
+  events.push({ type: 'world.market_changed', causes: [`market:${market.locationId}:update`, `turn:${market.lastUpdatedTurn}:tick`], payload: { locationId: market.locationId, turn: market.lastUpdatedTurn } });
   return { jianghu: j, events };
 }
 
