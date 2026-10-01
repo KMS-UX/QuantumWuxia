@@ -68,8 +68,8 @@ The narrator never becomes an alternate state reducer.
 - [x] Inspect current `actionInterpreter.ts`.
 - [x] Identify malformed literal escape sequences in executable TypeScript.
 - [x] Replace them with real source newlines.
-- [ ] Run TypeScript validation.
-- [ ] Run production build.
+- [ ] Run TypeScript validation (CI workflow added; awaiting GitHub execution).
+- [ ] Run production build (CI workflow added; awaiting GitHub execution).
 - [ ] Record any remaining compiler/build failures.
 
 ### P0.2 Determinism and validation
@@ -263,7 +263,7 @@ This milestone is complete when:
 - [ ] deterministic engine tests pass;
 - [ ] `actionInterpreter.ts` contains valid TypeScript source;
 - [ ] `SimulationState` is explicitly documented as canonical;
-- [ ] player action resolution crosses one visible boundary;
+- [x] player action resolution crosses one visible boundary;
 - [ ] invalid simulation state cannot be committed;
 - [ ] the resolver remains independent of React, Zustand, storage and LLM providers;
 - [ ] existing Jianghu causality v5 behavior remains intact;
