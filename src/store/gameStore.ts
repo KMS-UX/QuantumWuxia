@@ -360,7 +360,7 @@ export const useGameStore = create<GameStore>()(
           }
 
           get().addVisitedLocation(newState.location);
-          if (newState.character?.stats.currentHp <= 0) {
+          if ((newState.character?.stats.currentHp ?? 0) <= 0) {
             get().setDead(true);
           }
           setTimeout(() => get().checkAchievements(), 100);

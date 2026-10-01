@@ -63,8 +63,8 @@ function chooseBranch(j: JianghuState, chain: CausalChainState): V5Branch {
   if (chain.kind === 'information') {
     const rumor = j.rumors.find(r => r.id === event.id || r.text === event.description);
     if (rumor?.status === 'false') return 'false';
-    if (rumor?.status === 'confirmed' || rumor?.credibility >= 80) return 'confirm';
-    if (rumor && rumor.credibility < 30) return 'suppress';
+    if (rumor?.status === 'confirmed' || (rumor?.credibility ?? 0) >= 80) return 'confirm';
+    if (rumor && (rumor.credibility ?? 0) < 30) return 'suppress';
     return event.severity >= 4 ? 'escalate' : 'react';
   }
   if (chain.kind === 'faction') {

@@ -23,6 +23,28 @@ function inferDestination(text: string, simulation: SimulationState): string | u
   return simulation.world.locationIds.find(id => text.includes(id.toLowerCase()));
 }
 
+function inferApproach(text: string): string | undefined {
+  const approaches: Array<[string, string]> = [
+    ['quietly', 'quiet'],
+    ['carefully', 'careful'],
+    ['cautiously', 'cautious'],
+    ['aggressively', 'aggressive'],
+    ['openly', 'open'],
+    ['secretly', 'secret'],
+  ];
+  return approaches.find(([keyword]) => text.includes(keyword))?.[1];
+}
+
+function inferTechnique(text: string): string | undefined {
+  const match = text.match(/(?:use|with|using)\s+([a-z0-9_-]+(?:\s+[a-z0-9_-]+){0,2})/i);
+  return match?.[1]?.trim();
+}
+
+function inferGoal(text: string): string | undefined {
+  const match = text.match(/(?:to|so that|in order to)\s+(.+)$/i);
+  return match?.[1]?.trim();
+}
+
 export function interpretPlayerAction(
   description: string,
   simulation: SimulationState,
@@ -37,12 +59,20 @@ export function interpretPlayerAction(
   const targetId = ['talk', 'attack', 'inspect', 'stealth'].includes(kind)
     ? inferTarget(lower, simulation)
     : undefined;
+  const approach = inferApproach(lower);
+  const techniqueId = kind === 'attack' || kind === 'meditate' ? inferTechnique(lower) : undefined;
+  const intendedGoal = inferGoal(normalized);
 
   return {
     kind,
     description: normalized,
+    actorId: simulation.character.id,
     risk,
+    riskPosture: risk,
     ...(destinationId ? { destinationId } : {}),
     ...(targetId ? { targetId } : {}),
+    ...(approach ? { approach } : {}),
+    ...(techniqueId ? { techniqueId } : {}),
+    ...(intendedGoal ? { intendedGoal } : {}),
   };
 }

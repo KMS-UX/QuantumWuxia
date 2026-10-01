@@ -5,6 +5,7 @@ import type { ProposedAction, SimulationState } from '../../src/engine/types';
 import { enterSimulationBoundary, exitSimulationBoundary } from '../../src/engine/simulationBoundary';
 import { createSimulationState, ensureSimulationState, mergeSimulationState } from '../../src/engine/simulationAdapter';
 import { resolveAction } from '../../src/engine/resolveAction';
+import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
 import { resolvePlayerAction } from '../../src/engine/actionPipeline';
 
 function makeSimulation(): SimulationState {
@@ -233,4 +234,23 @@ test('invalid existing simulation state never falls back to legacy semantic mapp
     () => ensureSimulationState(gameState),
     /refusing to fall back to legacy GameState mappings/,
   );
+});
+
+
+test('intent interpreter produces a structured action contract without resolving world state', () => {
+  const simulation = makeSimulation();
+  simulation.world.locationIds.push('mountain');
+  const action = interpretPlayerAction(
+    'Travel to mountain quietly to find the missing healer using smoke bomb',
+    simulation,
+    'high',
+  );
+
+  assert.equal(action.kind, 'travel');
+  assert.equal(action.actorId, 'hero-1');
+  assert.equal(action.destinationId, 'mountain');
+  assert.equal(action.approach, 'quiet');
+  assert.equal(action.intendedGoal, 'find the missing healer using smoke bomb');
+  assert.equal(action.riskPosture, 'high');
+  assert.equal(action.risk, 'high');
 });

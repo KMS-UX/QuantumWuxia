@@ -71,10 +71,19 @@ export interface SimulationState {
 export interface ProposedAction {
   kind: ActionKind;
   description: string;
+  /** Canonical actor; defaults to the player when omitted by legacy callers. */
+  actorId?: string;
   targetId?: string;
   destinationId?: string;
   approach?: string;
+  toolId?: string;
+  techniqueId?: string;
+  intendedGoal?: string;
   risk: RiskLevel;
+  /** Player-selected risk posture; distinct from resolver-calculated world difficulty. */
+  riskPosture?: RiskLevel;
+  conditionalClauses?: string[];
+  declaredConstraints?: string[];
   qiCost?: number;
   timeCost?: number;
 }
