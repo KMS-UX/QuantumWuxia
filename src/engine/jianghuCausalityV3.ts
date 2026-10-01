@@ -1,5 +1,6 @@
 import type { SimulationState, StateEvent } from './types';
-import type { JianghuState, NPCState, NPCGoal, RelationshipState, ObligationState, FactionRelationState, MarketState } from './jianghu';
+import type { JianghuState, NPCState, RelationshipState, ObligationState, FactionRelationState, MarketState } from './jianghu';
+import { createNpcPlan, emitNpcAgencyEvent, evaluateNpcOpportunity, executeNpcPlan, selectNpcGoal } from './npcAgency';
 
 export interface V3Result {
   jianghu: JianghuState;
@@ -90,54 +91,35 @@ function applyFactionPressure(j: JianghuState, simulation: SimulationState, even
 
 function autonomousNpcActions(j: JianghuState, simulation: SimulationState, events: StateEvent[]): void {
   let budget = 3;
-  const ordered = j.npcs.filter(n => n.alive).sort((a, b) => {
-    const pa = Math.max(...a.goals.filter(g => g.active).map(g => g.priority), 0);
-    const pb = Math.max(...b.goals.filter(g => g.active).map(g => g.priority), 0);
-    return pb - pa;
-  });
+  const ordered = j.npcs
+    .filter(npc => npc.alive)
+    .sort((a, b) => {
+      const pa = selectNpcGoal(a)?.priority ?? 0;
+      const pb = selectNpcGoal(b)?.priority ?? 0;
+      return pb - pa || a.id.localeCompare(b.id);
+    });
+
   for (const npc of ordered) {
     if (budget <= 0) break;
-    const goal: NPCGoal | undefined = npc.goals.filter(g => g.active).sort((a, b) => b.priority - a.priority)[0];
+
+    // Goal: choose the highest-priority active goal.
+    const goal = selectNpcGoal(npc);
     if (!goal) continue;
-    let acted = false;
-    if (goal.kind === 'travel' && goal.targetId && npc.locationId !== goal.targetId) {
-      npc.locationId = goal.targetId;
-      goal.progress = 100;
-      goal.active = false;
-      acted = true;
-    } else if (goal.kind === 'trade') {
-      const market = ensureMarket(j, npc.locationId, simulation.world.turn);
-      const good = Object.keys(market.goods)[0];
-      if (good && npc.resources > 0) {
-        market.goods[good] += 1;
-        npc.resources = Math.max(0, npc.resources - 1);
-        acted = true;
-      }
-    } else if (goal.kind === 'collect_debt') {
-      const debt = j.obligations.find(o => !o.fulfilled && o.creditorId === npc.id);
-      if (debt) {
-        const r = relation(j, debt.debtorId, npc.id, simulation.world.turn);
-        r.debt = clamp(r.debt + debt.severity, 0, 100);
-        r.grudge = clamp(r.grudge + Math.ceil(debt.severity / 2), 0, 100);
-        acted = true;
-      }
-    } else if (goal.kind === 'investigate') {
-      const rumor = j.rumors.find(r => r.currentLocationId === npc.locationId && r.knownBy.includes(npc.id));
-      if (rumor) {
-        rumor.credibility = clamp(rumor.credibility + 2, 0, 100);
-        acted = true;
-      }
-    } else if (goal.kind === 'protect') {
-      const localEvent = j.worldEvents.find(e => e.active && e.locationId === npc.locationId);
-      if (localEvent) {
-        localEvent.severity = Math.max(1, localEvent.severity - 1);
-        acted = true;
-      }
-    }
-    if (acted) {
-      budget--;
-      events.push({ type: 'world.npc_action', causes: [`npc:${npc.id}:goal:${goal.id}`, `npc:${npc.id}:opportunity`], witnesses: [npc.id], payload: { npcId: npc.id, goalId: goal.id, kind: goal.kind, turn: simulation.world.turn } });
-    }
+
+    // Plan: turn the goal into a concrete deterministic plan.
+    const plan = createNpcPlan(npc, goal);
+
+    // Opportunity: check the current world before committing to an action.
+    const opportunity = evaluateNpcOpportunity(j, npc, plan);
+    if (!opportunity.available) continue;
+
+    // Action + consequence: mutate the cloned Jianghu state and emit a structured event.
+    const result = executeNpcPlan(j, npc, plan, opportunity, simulation.world.turn, relation, ensureMarket);
+    if (!result.acted) continue;
+
+    budget--;
+    const event = emitNpcAgencyEvent(result, npc, simulation.world.turn);
+    if (event) events.push(event);
   }
 }
 
