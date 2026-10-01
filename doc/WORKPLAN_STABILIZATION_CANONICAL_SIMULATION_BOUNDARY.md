@@ -2,7 +2,7 @@
 
 **Status:** Approved / In progress  
 **Baseline:** `main` after Jianghu Causality v5  
-**Work branch:** `stabilization-canonical-simulation-boundary`  
+**Work branch:** `explicit-legacy-simulation-migration`  
 **Date:** 2026-10-01
 
 ## 1. Purpose
@@ -264,7 +264,7 @@ This milestone is complete when:
 - [ ] `actionInterpreter.ts` contains valid TypeScript source;
 - [ ] `SimulationState` is explicitly documented as canonical;
 - [x] player action resolution crosses one visible boundary;
-- [ ] invalid simulation state cannot be committed;
+- [x] invalid simulation state cannot be committed;
 - [ ] the resolver remains independent of React, Zustand, storage and LLM providers;
 - [ ] existing Jianghu causality v5 behavior remains intact;
 - [ ] no new gameplay system creates a second authoritative state model.
