@@ -113,7 +113,7 @@ export const DEFAULT_JIANGHU: JianghuState = {
       disposition: 0,
       goals: [{ id: 'goal-tea-open', kind: 'rest', description: 'Keep the tea house open', priority: 80, progress: 0, active: true }, { id: 'goal-avoid-trouble', kind: 'protect', description: 'Avoid sect trouble', priority: 70, progress: 0, active: true }],
       fears: ['bandits', 'war between sects'],
-      secrets: [],
+      secrets: [],\n      factionId: 'faction-jade-hall',
       skills: ['tea', 'local gossip', 'basic first aid'],
       resources: 20,
       memories: [],
@@ -241,7 +241,7 @@ export function applyJianghuAction(
         confidence: 60,
         turn,
       });
-      npc.disposition = clamp(npc.disposition + delta, -100, 100);
+      npc.disposition = clamp(npc.disposition + delta, -100, 100);\n      if (npc.factionId) {\n        const faction = jianghu.factions.find(f => f.id === npc.factionId);\n        if (faction) faction.playerReputation = clamp(faction.playerReputation + 1, -100, 100);\n      }
       events.push({
         type: 'world.relationship_changed',
         payload: { subjectId: simulation.character.id, targetId: npc.id, trust: relationship.trust, respect: relationship.respect },
@@ -260,7 +260,7 @@ export function applyJianghuAction(
       relationship.grudge = clamp(relationship.grudge + 5, 0, 100);
       relationship.trust = clamp(relationship.trust - 10, -100, 100);
       relationship.fear = clamp(relationship.fear + 3, 0, 100);
-      npc.disposition = clamp(npc.disposition - 5, -100, 100);
+      npc.disposition = clamp(npc.disposition - 5, -100, 100);\n      if (npc.factionId) {\n        const faction = jianghu.factions.find(f => f.id === npc.factionId);\n        if (faction) faction.playerReputation = clamp(faction.playerReputation - 5, -100, 100);\n      }
       npc.memories.push({
         id: `memory-${npc.id}-${turn}`,
         event: `Was attacked by ${simulation.character.name}`,
