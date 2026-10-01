@@ -18,7 +18,7 @@ export function createSimulationState(gameState: GameState, knownLocationIds: st
     schemaVersion: 1,
     jianghu: gameState.simulation?.jianghu
       ? JSON.parse(JSON.stringify(gameState.simulation.jianghu))
-      : createDefaultJianghu(),
+      : createDefaultJianghu(locationId),
     character: {
       id: character.id,
       name: character.name,
