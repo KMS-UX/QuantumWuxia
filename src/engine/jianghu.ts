@@ -168,6 +168,7 @@ export const DEFAULT_JIANGHU: JianghuState = {
   rumors: [],
   obligations: [],
   worldEvents: [],
+  knowledgeVersion: 1,
 };
 
 function cloneJianghu(j: JianghuState): JianghuState {
@@ -222,7 +223,7 @@ export function applyJianghuAction(
 ): { jianghu: JianghuState; events: StateEvent[] } {
   const jianghu = cloneJianghu(input);
   const events: StateEvent[] = [];
-  const turn = simulation.world.turn;\n  const playerId = simulation.character.id;
+  const turn = simulation.world.turn;
 
   if (action.kind === 'talk' && action.targetId) {
     const npc = jianghu.npcs.find(n => n.id === action.targetId);
