@@ -21,6 +21,7 @@ function throws(fn: () => unknown, expected: new (...args: never[]) => Error): v
 
 const baseState = (): SimulationState => ({
   schemaVersion: 1,
+  ledger: [],
   character: {
     id: 'hero-1',
     name: 'Lin',
