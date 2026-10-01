@@ -1,7 +1,8 @@
 import type { ProposedAction, SimulationState, StateEvent } from './types';
 
 export type MemoryValence = 'positive' | 'negative' | 'neutral';
-export type RumorStatus = 'unverified' | 'plausible' | 'confirmed' | 'false';\nexport type GoalKind = 'travel' | 'trade' | 'investigate' | 'protect' | 'collect_debt' | 'train' | 'social' | 'rest';
+export type RumorStatus = 'unverified' | 'plausible' | 'confirmed' | 'false';
+export type GoalKind = 'travel' | 'trade' | 'investigate' | 'protect' | 'collect_debt' | 'train' | 'social' | 'rest';
 
 export interface NPCMemory {
   id: string;
@@ -12,7 +13,17 @@ export interface NPCMemory {
   turn: number;
 }
 
-export interface NPCGoal {\n  id: string;\n  kind: GoalKind;\n  description: string;\n  targetId?: string;\n  priority: number;\n  progress: number;\n  active: boolean;\n}\n\nexport interface NPCState {
+export interface NPCGoal {
+  id: string;
+  kind: GoalKind;
+  description: string;
+  targetId?: string;
+  priority: number;
+  progress: number;
+  active: boolean;
+}
+
+export interface NPCState {
   id: string;
   name: string;
   role: string;
@@ -119,8 +130,11 @@ export interface JianghuState {
   relationships: RelationshipState[];
   rumors: RumorState[];
   obligations: ObligationState[];
-  worldEvents: WorldEventState[];\n  knowledgeVersion: number;
-}
+  worldEvents: WorldEventState[];
+  knowledgeVersion: number;
+  factionRelations?: FactionRelationState[];
+  markets?: MarketState[];
+
 
 export const DEFAULT_JIANGHU: JianghuState = {
   schemaVersion: 1,
@@ -133,7 +147,8 @@ export const DEFAULT_JIANGHU: JianghuState = {
       disposition: 0,
       goals: [{ id: 'goal-tea-open', kind: 'rest', description: 'Keep the tea house open', priority: 80, progress: 0, active: true }, { id: 'goal-avoid-trouble', kind: 'protect', description: 'Avoid sect trouble', priority: 70, progress: 0, active: true }],
       fears: ['bandits', 'war between sects'],
-      secrets: [],\n      factionId: 'faction-jade-hall',
+      secrets: [],
+      factionId: 'faction-jade-hall',
       skills: ['tea', 'local gossip', 'basic first aid'],
       resources: 20,
       memories: [],
@@ -271,7 +286,11 @@ export function applyJianghuAction(
         confidence: 60,
         turn,
       });
-      npc.disposition = clamp(npc.disposition + delta, -100, 100);\n      if (npc.factionId) {\n        const faction = jianghu.factions.find(f => f.id === npc.factionId);\n        if (faction) faction.playerReputation = clamp(faction.playerReputation + 1, -100, 100);\n      }
+      npc.disposition = clamp(npc.disposition + delta, -100, 100);
+      if (npc.factionId) {
+        const faction = jianghu.factions.find(f => f.id === npc.factionId);
+        if (faction) faction.playerReputation = clamp(faction.playerReputation + 1, -100, 100);
+      }
       events.push({
         type: 'world.relationship_changed',
         payload: { subjectId: simulation.character.id, targetId: npc.id, trust: relationship.trust, respect: relationship.respect },
@@ -290,7 +309,11 @@ export function applyJianghuAction(
       relationship.grudge = clamp(relationship.grudge + 5, 0, 100);
       relationship.trust = clamp(relationship.trust - 10, -100, 100);
       relationship.fear = clamp(relationship.fear + 3, 0, 100);
-      npc.disposition = clamp(npc.disposition - 5, -100, 100);\n      if (npc.factionId) {\n        const faction = jianghu.factions.find(f => f.id === npc.factionId);\n        if (faction) faction.playerReputation = clamp(faction.playerReputation - 5, -100, 100);\n      }
+      npc.disposition = clamp(npc.disposition - 5, -100, 100);
+      if (npc.factionId) {
+        const faction = jianghu.factions.find(f => f.id === npc.factionId);
+        if (faction) faction.playerReputation = clamp(faction.playerReputation - 5, -100, 100);
+      }
       npc.memories.push({
         id: `memory-${npc.id}-${turn}`,
         event: `Was attacked by ${simulation.character.name}`,
@@ -373,7 +396,10 @@ export function tickJianghu(
   const events: StateEvent[] = [];
   const turn = simulation.world.turn;
 
-  advanceNpcGoals(jianghu, simulation, events);\n  propagateRumors(jianghu, simulation, events);\n\n  for (const faction of jianghu.factions) {
+  advanceNpcGoals(jianghu, simulation, events);
+  propagateRumors(jianghu, simulation, events);
+
+  for (const faction of jianghu.factions) {
     const drift = faction.internalTension > 70 ? -1 : faction.resources < 20 ? -1 : 0;
     faction.resources = clamp(faction.resources + drift, 0, 100);
     faction.internalTension = clamp(faction.internalTension + (faction.resources < 15 ? 1 : -1), 0, 100);
