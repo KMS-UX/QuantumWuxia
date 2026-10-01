@@ -124,6 +124,17 @@ export interface MarketState {
 }
 
 
+export interface LocationConditionState {
+  id: string;
+  locationId: string;
+  sourceId: string;
+  label: string;
+  severity: number;
+  createdTurn: number;
+  expiresTurn: number;
+  active: boolean;
+}
+
 export type KnowledgeSourceKind = 'direct' | 'npc' | 'rumor' | 'document' | 'observation' | 'faction';
 
 export interface KnowledgeRecord {
@@ -163,6 +174,7 @@ export interface JianghuState {
   markets?: MarketState[];
   knowledgeRecords?: KnowledgeRecord[];
   causalChains?: CausalChainState[];
+  locationConditions?: LocationConditionState[];
 }
 
 export const DEFAULT_JIANGHU: JianghuState = {
@@ -235,6 +247,7 @@ export const DEFAULT_JIANGHU: JianghuState = {
   knowledgeVersion: 1,
   knowledgeRecords: [],
   causalChains: [],
+  locationConditions: [],
   factionRelations: [{ id: 'frel-jade-black', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', trust: 0, hostility: 15, trade: 30 }],
   markets: [{ locationId: 'The Crossroads', goods: { tea: 20, rice: 15, medicine: 8 }, basePrices: { tea: 4, rice: 3, medicine: 12 }, priceMultipliers: { tea: 1, rice: 1, medicine: 1 }, scarcity: { tea: 0, rice: 0, medicine: 20 }, lastUpdatedTurn: 0 }],
 };
@@ -253,6 +266,7 @@ function cloneJianghu(j: JianghuState): JianghuState {
     markets: (j.markets ?? []).map(m => ({ ...m, goods: { ...m.goods }, basePrices: { ...m.basePrices }, priceMultipliers: { ...m.priceMultipliers }, scarcity: { ...m.scarcity } })),
     knowledgeRecords: (j.knowledgeRecords ?? []).map(k => ({ ...k })),
     causalChains: (j.causalChains ?? []).map(chain => ({ ...chain, sourceIds: [...chain.sourceIds] })),
+    locationConditions: (j.locationConditions ?? []).map(condition => ({ ...condition })),
   };
 }
 

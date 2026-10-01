@@ -99,7 +99,10 @@ export interface StateEvent {
     | 'world.market_changed'
     | 'world.npc_action'
     | 'world.causal_chain_advanced'
-    | 'world.causal_chain_completed';
+    | 'world.causal_chain_completed'
+    | 'world.causal_branch_selected'
+    | 'world.faction_reaction'
+    | 'world.location_reaction';
   payload: Record<string, string | number | boolean | null>;
 }
 

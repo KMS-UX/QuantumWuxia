@@ -10,6 +10,7 @@ import { syncInjuries } from './wuxia';
 import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
 import { applyCausalityV3 } from './jianghuCausalityV3';
 import { processInformation, advanceCausalChains } from './jianghuInformationV4';
+import { advanceCausalityV5 } from './jianghuCausalityV5';
 
 const DIFFICULTY: Record<ProposedAction['kind'], number> = {
   inspect: 25,
@@ -213,8 +214,9 @@ export function resolveAction(
     const v3 = applyCausalityV3(ticked.jianghu, state);
     const info = processInformation(v3.jianghu, state);
     const chains = advanceCausalChains(info.jianghu, state);
-    state.jianghu = chains.jianghu;
-    events.push(...ticked.events, ...v3.events, ...info.events, ...chains.events);
+    const v5 = advanceCausalityV5(chains.jianghu, state);
+    state.jianghu = v5.jianghu;
+    events.push(...ticked.events, ...v3.events, ...info.events, ...chains.events, ...v5.events);
   }
 
   events.push({
