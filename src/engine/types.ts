@@ -97,7 +97,9 @@ export interface StateEvent {
     | 'world.obligation_changed'
     | 'world.faction_conflict'
     | 'world.market_changed'
-    | 'world.npc_action';
+    | 'world.npc_action'
+    | 'world.causal_chain_advanced'
+    | 'world.causal_chain_completed';
   payload: Record<string, string | number | boolean | null>;
 }
 

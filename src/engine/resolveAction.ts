@@ -9,6 +9,7 @@ import { qiRecovery } from './wuxiaRules';
 import { syncInjuries } from './wuxia';
 import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
 import { applyCausalityV3 } from './jianghuCausalityV3';
+import { processInformation, advanceCausalChains } from './jianghuInformationV4';
 
 const DIFFICULTY: Record<ProposedAction['kind'], number> = {
   inspect: 25,
@@ -210,8 +211,10 @@ export function resolveAction(
   if (state.jianghu) {
     const ticked = tickJianghu(state.jianghu, state);
     const v3 = applyCausalityV3(ticked.jianghu, state);
-    state.jianghu = v3.jianghu;
-    events.push(...ticked.events, ...v3.events);
+    const info = processInformation(v3.jianghu, state);
+    const chains = advanceCausalChains(info.jianghu, state);
+    state.jianghu = chains.jianghu;
+    events.push(...ticked.events, ...v3.events, ...info.events, ...chains.events);
   }
 
   events.push({
