@@ -1,6 +1,6 @@
 import type { StateEvent } from './types';
 import type { EventLedgerEntry } from './eventLedger';
-import { getNpcKnowledgeContext } from './npcKnowledge';
+import { getNpcKnowledgeContext, npcHasMemory } from './npcKnowledge';
 import type { JianghuState, NPCGoal, NPCState } from './jianghu';
 
 export type NPCPlanKind = NPCGoal['kind'];
@@ -69,9 +69,15 @@ export function evaluateNpcOpportunity(
     }
     case 'investigate': {
       const knowledge = getNpcKnowledgeContext(j, ledger, npc.id);
-      return knowledge.knownRumors.some(rumor => rumor.currentLocationId === npc.locationId)
-        ? { available: true, reason: 'known-local-rumor-available' }
-        : { available: false, reason: 'no-known-local-rumor' };
+      const localRumor = knowledge.knownRumors.some(rumor => rumor.currentLocationId === npc.locationId);
+      const rememberedLead = npcHasMemory(j, npc.id, memory =>
+        memory.event.toLowerCase().includes('rumor') ||
+        memory.interpretation.toLowerCase().includes('rumor') ||
+        memory.interpretation.toLowerCase().includes('investigate'),
+      );
+      return localRumor || rememberedLead
+        ? { available: true, reason: localRumor ? 'known-local-rumor-available' : 'remembered-investigation-lead' }
+        : { available: false, reason: 'no-known-rumor-or-memory-lead' };
     }
     case 'protect':
       return j.worldEvents.some(event => event.active && event.locationId === npc.locationId)
