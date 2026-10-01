@@ -66,7 +66,9 @@ export function createSimulationState(gameState: GameState, knownLocationIds: st
     world: {
       turn: gameState.turnCount,
       locationIds,
-      knownFacts: gameState.simulation?.world.knownFacts ? [...gameState.simulation.world.knownFacts] : [],\n      knownRumorIds: gameState.simulation?.world.knownRumorIds ? [...gameState.simulation.world.knownRumorIds] : [],\n      knownNpcIds: gameState.simulation?.world.knownNpcIds ? [...gameState.simulation.world.knownNpcIds] : [],\n      knownRumorIds: gameState.simulation?.world.knownRumorIds ? [...gameState.simulation.world.knownRumorIds] : [],\n      knownNpcIds: gameState.simulation?.world.knownNpcIds ? [...gameState.simulation.world.knownNpcIds] : [],
+      knownFacts: gameState.simulation?.world.knownFacts ? [...gameState.simulation.world.knownFacts] : [],
+      knownRumorIds: [...(gameState.simulation?.world.knownRumorIds ?? [])],
+      knownNpcIds: [...(gameState.simulation?.world.knownNpcIds ?? [])],
     },
   };
 }
@@ -96,7 +98,9 @@ function cloneSimulation(simulation: SimulationState): SimulationState {
     world: {
       ...simulation.world,
       locationIds: [...simulation.world.locationIds],
-      knownFacts: [...simulation.world.knownFacts],\n        knownRumorIds: [...(simulation.world.knownRumorIds ?? [])],\n        knownNpcIds: [...(simulation.world.knownNpcIds ?? [])],\n        knownRumorIds: [...(simulation.world.knownRumorIds ?? [])],\n        knownNpcIds: [...(simulation.world.knownNpcIds ?? [])],
+      knownFacts: [...simulation.world.knownFacts],
+      knownRumorIds: [...(simulation.world.knownRumorIds ?? [])],
+      knownNpcIds: [...(simulation.world.knownNpcIds ?? [])],
     },
   };
 }
@@ -155,5 +159,6 @@ export function simulationStateToPromptContext(simulation: SimulationState): str
     `Nearby known people: ${nearbyNpcs}`,
     `Local rumors: ${activeRumors}`,
     `Known facts: ${simulation.world.knownFacts.join(', ') || 'none'}`,
-  ].join('\n');
+  ].join('
+');
 }

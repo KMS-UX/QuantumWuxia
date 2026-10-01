@@ -6,7 +6,9 @@ import type {
 } from './types';
 import { validateState } from './validateState';
 import { qiRecovery } from './wuxiaRules';
-import { syncInjuries } from './wuxia';\nimport { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
+import { syncInjuries } from './wuxia';
+import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
+import { applyCausalityV3 } from './jianghuCausalityV3';
 
 const DIFFICULTY: Record<ProposedAction['kind'], number> = {
   inspect: 25,
@@ -78,7 +80,10 @@ export function resolveAction(
       ...input.world,
       locationIds: [...input.world.locationIds],
       knownFacts: [...input.world.knownFacts],
+      knownRumorIds: [...(input.world.knownRumorIds ?? [])],
+      knownNpcIds: [...(input.world.knownNpcIds ?? [])],
     },
+    jianghu: input.jianghu ? JSON.parse(JSON.stringify(input.jianghu)) : createDefaultJianghu(input.character.locationId),
   };
   const events: StateEvent[] = [];
   const c = state.character;
@@ -194,7 +199,21 @@ export function resolveAction(
     c.conditions = synced.conditions;
   }
 
+  if (state.jianghu) {
+    const interaction = applyJianghuAction(state.jianghu, state, action);
+    state.jianghu = interaction.jianghu;
+    events.push(...interaction.events);
+  }
+
   state.world.turn += 1;
+
+  if (state.jianghu) {
+    const ticked = tickJianghu(state.jianghu, state);
+    const v3 = applyCausalityV3(ticked.jianghu, state);
+    state.jianghu = v3.jianghu;
+    events.push(...ticked.events, ...v3.events);
+  }
+
   events.push({
     type: 'action.resolved',
     payload: { kind: action.kind, status, difficulty, roll, score, turn: state.world.turn },
