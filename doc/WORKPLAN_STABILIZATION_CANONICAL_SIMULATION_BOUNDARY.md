@@ -183,6 +183,16 @@ The player may choose to act cautiously or aggressively, but the resolver calcul
 
 Add a first-class machine-readable event record after the boundary is stable.
 
+### Phase 4.1 — Ledger foundation
+
+- [x] Introduce `EventLedgerEntry` as a provider-independent machine-readable event contract.
+- [x] Project deterministic `StateEvent` records into ledger entries.
+- [x] Expose ledger entries alongside action resolution results.
+- [x] Keep narrative text separate from ledger data.
+- [ ] Persist the ledger in canonical simulation state.
+- [ ] Expand event producers with explicit causes, witnesses, knowledge consequences, and causal links.
+
+
 Minimum event metadata:
 
 - event id;
