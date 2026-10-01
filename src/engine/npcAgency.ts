@@ -62,11 +62,7 @@ export function evaluateNpcOpportunity(
     case 'collect_debt': {
       const knowledge = getNpcKnowledgeContext(j, ledger, npc.id);
       const knownObligation = j.obligations.some(obligation =>
-        !obligation.fulfilled &&
-        obligation.creditorId === npc.id &&
-        knowledge.knownLedgerEntries.some(entry =>
-          entry.knowledgeConsequences.includes(`obligation:${obligation.id}:overdue`),
-        ),
+        !obligation.fulfilled && obligation.creditorId === npc.id,
       );
       return knownObligation
         ? { available: true, reason: 'known-unfulfilled-obligation' }
