@@ -60,7 +60,6 @@ export function evaluateNpcOpportunity(
         : { available: false, reason: 'no-local-market-or-resources' };
     }
     case 'collect_debt': {
-      const knowledge = getNpcKnowledgeContext(j, ledger, npc.id);
       const knownObligation = j.obligations.some(obligation =>
         !obligation.fulfilled && obligation.creditorId === npc.id,
       );
