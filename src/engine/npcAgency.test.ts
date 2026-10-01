@@ -8,6 +8,7 @@ import {
   selectNpcGoal,
 } from './npcAgency';
 import { createDefaultJianghu } from './jianghu';
+import { getNpcKnowledgeContext, canNpcKnowLedgerEntry } from './npcKnowledge';
 
 const simulation = {
   schemaVersion: 1 as const,
@@ -56,7 +57,7 @@ test('NPC agency separates goal, plan, opportunity, action, and consequence', ()
   const goal = npc.goals.find(candidate => candidate.kind === 'protect')!;
   const plan = createNpcPlan(npc, goal);
 
-  const opportunity = evaluateNpcOpportunity(jianghu, npc, plan, simulation);
+  const opportunity = evaluateNpcOpportunity(jianghu, npc, plan, simulation.ledger);
   assert.equal(opportunity.available, false);
 
   const forcedPlan = createNpcPlan(npc, {
@@ -118,4 +119,42 @@ test('NPC travel action deterministically completes its goal and emits a causal 
     'npc:npc-teahouse-keeper:goal:goal-tea-open',
     'npc:npc-teahouse-keeper:opportunity',
   ]);
+});
+
+
+test('NPC knowledge cannot see unrelated ledger events', () => {
+  const jianghu = createDefaultJianghu();
+  const npc = jianghu.npcs[0];
+
+  const visible = {
+    eventId: 't1-1-world.npc_action',
+    turn: 1,
+    actorId: npc.id,
+    actionKind: 'other' as const,
+    actionDescription: 'Kept watch',
+    targetIds: [],
+    locationId: npc.locationId,
+    causes: ['npc:watch'],
+    effects: ['observed'],
+    witnesses: [npc.id],
+    knowledgeConsequences: [],
+    provenance: 'deterministic-resolver' as const,
+    causalLinks: [],
+    eventType: 'world.npc_action' as const,
+    payload: { npcId: npc.id, turn: 1 },
+  };
+  const hidden = {
+    ...visible,
+    eventId: 't1-2-world.npc_action',
+    actorId: 'npc-unrelated',
+    witnesses: ['npc-unrelated'],
+    knowledgeConsequences: [],
+  };
+
+  assert.equal(canNpcKnowLedgerEntry(visible, npc.id), true);
+  assert.equal(canNpcKnowLedgerEntry(hidden, npc.id), false);
+
+  const context = getNpcKnowledgeContext(jianghu, [visible, hidden], npc.id);
+  assert.equal(context.knownLedgerEntries.length, 1);
+  assert.equal(context.knownLedgerEntries[0].eventId, visible.eventId);
 });
