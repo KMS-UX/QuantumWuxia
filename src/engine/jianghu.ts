@@ -248,6 +248,7 @@ function cloneJianghu(j: JianghuState): JianghuState {
     rumors: j.rumors.map(r => ({ ...r, knownBy: [...r.knownBy] })),
     obligations: j.obligations.map(o => ({ ...o })),
     worldEvents: j.worldEvents.map(e => ({ ...e, factionIds: [...e.factionIds] })),
+    knowledgeVersion: j.knowledgeVersion,
     factionRelations: (j.factionRelations ?? []).map(r => ({ ...r })),
     markets: (j.markets ?? []).map(m => ({ ...m, goods: { ...m.goods }, basePrices: { ...m.basePrices }, priceMultipliers: { ...m.priceMultipliers }, scarcity: { ...m.scarcity } })),
     knowledgeRecords: (j.knowledgeRecords ?? []).map(k => ({ ...k })),
