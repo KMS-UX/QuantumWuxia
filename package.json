@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test:simulation": "tsx --test test/simulation/*.test.ts"
+    "test:simulation": "tsx --test test/simulation/*.test.ts src/engine/jianghu*.test.ts src/engine/npc*.test.ts src/engine/wuxia.test.ts src/engine/actionPipeline.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

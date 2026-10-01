@@ -1,8 +1,10 @@
+import test from 'node:test';
+import { expect } from '../../test/support/expect';
 import { advanceCausalChains, processInformation, recordKnowledge } from './jianghuInformationV4';
 import { createDefaultJianghu, createRumor } from './jianghu';
 import type { SimulationState } from './types';
 
-function state(): SimulationState {
+function state(turn = 5): SimulationState {
   return {
     schemaVersion: 1,
     ledger: [],
@@ -11,7 +13,7 @@ function state(): SimulationState {
       attributes: { strength: 10, agility: 10, constitution: 10, perception: 10, intelligence: 10, charisma: 10, luck: 10 },
       conditions: [], inventory: [], locationId: 'The Crossroads',
     },
-    world: { turn: 5, locationIds: ['The Crossroads'], knownFacts: [], knownRumorIds: [], knownNpcIds: [] },
+    world: { turn, locationIds: ['The Crossroads'], knownFacts: [], knownRumorIds: [], knownNpcIds: [] },
   };
 }
 
@@ -41,23 +43,27 @@ test('active world events advance one causal step per eligible turn', () => {
     description: 'A rumor is gaining traction.', factionIds: [], severity: 2,
     active: true, createdTurn: 5, expiresTurn: 9, locationId: 'The Crossroads',
   });
-  const result = advanceCausalChains(input, state());
+  // A chain is registered on first sighting and becomes eligible on the next turn.
+  const registered = advanceCausalChains(input, state(5));
+  expect(registered.jianghu.causalChains?.find(c => c.rootEventId === 'event-rumor-1')?.step).toBe(0);
+  const result = advanceCausalChains(registered.jianghu, state(6));
   const chain = result.jianghu.causalChains?.find(c => c.rootEventId === 'event-rumor-1');
   expect(chain?.step).toBe(1);
   expect(result.events.some(e => e.type === 'world.causal_chain_advanced')).toBe(true);
 });
 
-test('causal chains are bounded and eventually complete', () => {
+test('causal chains are bounded, complete once, and never respawn', () => {
   let input = createDefaultJianghu();
   input.worldEvents.push({
     id: 'event-social-1', kind: 'personal', title: 'Old grievance',
     description: 'A grievance remains unresolved.', factionIds: [], severity: 1,
     active: true, createdTurn: 5, expiresTurn: 20, locationId: 'The Crossroads',
   });
-  let sim = state();
-  for (let turn = 5; turn <= 7; turn++) {
-    sim = { ...sim, world: { ...sim.world, turn } };
-    input = advanceCausalChains(input, sim).jianghu;
+  for (let turn = 5; turn <= 14; turn++) {
+    input = advanceCausalChains(input, state(turn)).jianghu;
   }
-  expect(input.causalChains?.find(c => c.rootEventId === 'event-social-1')?.active).toBe(false);
+  const chains = input.causalChains?.filter(c => c.rootEventId === 'event-social-1') ?? [];
+  expect(chains).toHaveLength(1);
+  expect(chains[0].active).toBe(false);
+  expect(chains[0].step).toBe(3);
 });

@@ -109,7 +109,8 @@ export function processInformation(
 }
 
 function ensureChain(j: JianghuState, eventId: string, kind: CausalChainState['kind'], description: string, turn: number): CausalChainState {
-  const existing = j.causalChains?.find(c => c.rootEventId === eventId && c.active);
+  // Match completed chains too: a finished chain must not respawn (duplicate id, repeated step-1 effects) while its event stays active.
+  const existing = j.causalChains?.find(c => c.rootEventId === eventId);
   if (existing) return existing;
   const chain: CausalChainState = {
     id: `chain-${eventId}`,

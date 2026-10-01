@@ -10,6 +10,8 @@ import { changeTracker } from '../services/changeTracker';
 import { soundManager } from '../services/soundManager';
 import { resolvePlayerAction } from '../engine/actionPipeline';
 import { createSimulationState } from '../engine/simulationAdapter';
+import { FANTASY_PRESETS, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
+import type { SimulationState } from '../engine/types';
 
 interface GameStore {
   // Game state
@@ -169,6 +171,20 @@ function getDemoResponse(action: string): LLMResponse {
   };
 }
 
+/**
+ * For a character created from a Wuxia origin, the authored world decides the
+ * start location, simulation state and the five opening choices. The LLM only
+ * narrates; it cannot move the player or invent the choices.
+ */
+function resolveOriginStart(character: Character) {
+  const origin = character.originId ? findOrigin(character.originId) : undefined;
+  if (!origin) return undefined;
+  const preset = FANTASY_PRESETS[(character.fantasyPreset ?? '') as keyof typeof FANTASY_PRESETS] ?? FANTASY_PRESETS.living_legends;
+  const opening = buildOriginOpening(origin);
+  const simulation: SimulationState = createWuxiaSimulation(origin.id, preset, character.name);
+  return { origin, opening, simulation, scenario: buildOriginScenario(origin) };
+}
+
 function getDemoOpening(): LLMResponse {
   const opening = DEMO_OPENINGS[Math.floor(Math.random() * DEMO_OPENINGS.length)];
   return {
@@ -238,17 +254,25 @@ export const useGameStore = create<GameStore>()(
           await database.setMetadata('sessionStartTime', Date.now());
           
           let response: LLMResponse;
+          const originStart = resolveOriginStart(character);
           
           if (isDemo) {
             // Demo mode - use pre-written content
-            response = getDemoOpening();
+            response = originStart
+              ? { narrative: originStart.opening.narrative, choices: originStart.opening.choices, stateUpdates: {} }
+              : getDemoOpening();
             set({ isDemoMode: true });
           } else {
             response = await generateCharacterIntro(
               settings.llmConfig,
               character,
-              settings.worldTheme
+              settings.worldTheme,
+              originStart?.scenario
             );
+          }
+          if (originStart) {
+            // Authored choices and location always win over the LLM's.
+            response = { ...response, choices: originStart.opening.choices, stateUpdates: { ...response.stateUpdates, locationChange: originStart.opening.location } };
           }
           
           const turn: GameTurn = {
@@ -269,7 +293,7 @@ export const useGameStore = create<GameStore>()(
               };
               return {
                 ...initialState,
-                simulation: createSimulationState(initialState, [initialState.location]),
+                simulation: originStart?.simulation ?? createSimulationState(initialState, [initialState.location]),
               };
             })(),
             isLoading: false,
@@ -277,7 +301,10 @@ export const useGameStore = create<GameStore>()(
           });
         } catch (error) {
           // Fall back to demo mode on error
-          const response = getDemoOpening();
+          const originStart = resolveOriginStart(character);
+          const response: LLMResponse = originStart
+            ? { narrative: originStart.opening.narrative, choices: originStart.opening.choices, stateUpdates: { locationChange: originStart.opening.location } }
+            : getDemoOpening();
           const turn: GameTurn = {
             id: uuidv4(),
             narrative: response.narrative,
@@ -303,7 +330,7 @@ export const useGameStore = create<GameStore>()(
               };
               return {
                 ...initialState,
-                simulation: createSimulationState(initialState, [initialState.location]),
+                simulation: originStart?.simulation ?? createSimulationState(initialState, [initialState.location]),
               };
             })(),
           });

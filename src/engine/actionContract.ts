@@ -131,11 +131,14 @@ export function validateProposedAction(
   }
 
   if (action.targetId !== undefined) {
-    const targetExists = state.jianghu?.npcs.some(npc => npc.id === action.targetId) ?? false;
+    const targetExists =
+      (state.jianghu?.npcs.some(npc => npc.id === action.targetId) ?? false) ||
+      // Inspecting a place is legal; every other action still needs a person.
+      (action.kind === 'inspect' && state.world.locationIds.includes(action.targetId));
     if (!targetExists) {
       issues.push({
         path: 'targetId',
-        message: 'Target must reference a known Jianghu NPC.',
+        message: 'Target must reference a known Jianghu NPC (or a known location when inspecting).',
       });
     }
   }

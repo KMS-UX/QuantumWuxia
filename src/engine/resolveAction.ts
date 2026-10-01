@@ -54,7 +54,11 @@ export function resolveAction(
   }
 
   const normalizedAction = normalizeProposedAction(input, proposedAction);
-  const actionIssues = validateProposedAction(input, normalizedAction);
+  // An unknown travel destination is a legal-but-blocked action (handled below),
+  // not a malformed proposal; every other contract issue is still rejected.
+  const actionIssues = validateProposedAction(input, normalizedAction).filter(
+    issue => !(normalizedAction.kind === 'travel' && issue.path === 'destinationId'),
+  );
   if (actionIssues.length > 0) {
     throw new Error(`Invalid proposed action: ${actionIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
   }

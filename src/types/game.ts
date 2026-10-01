@@ -24,6 +24,10 @@ export interface Character {
   inventory: InventoryItem[];
   gold: number;
   background: string;
+  /** Wuxia origin id (src/world/content/origins.ts). When set, the authored world is used. */
+  originId?: string;
+  /** Fantasy-layer preset id (src/world/content/fantasyLayer.ts). */
+  fantasyPreset?: string;
 }
 
 export interface InventoryItem {

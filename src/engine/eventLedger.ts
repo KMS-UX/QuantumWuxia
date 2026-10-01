@@ -48,9 +48,9 @@ export function createEventLedger(
           ? ['rumor.spread']
           : [];
 
-    const causalLinks = Object.entries(event.payload)
-      .filter(([key, value]) => /cause|causal|chain/i.test(key) && typeof value === 'string')
-      .map(([, value]) => value);
+    const causalLinks = Object.entries(event.payload).flatMap(([key, value]) =>
+      /cause|causal|chain/i.test(key) && typeof value === 'string' ? [value] : [],
+    );
 
     return {
       eventId: `t${state.world.turn}-${state.ledger.length + index + 1}-${event.type}`,

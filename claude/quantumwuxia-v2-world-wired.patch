@@ -1,0 +1,1947 @@
+diff --git a/doc/AUDIT_2026-10-01.md b/doc/AUDIT_2026-10-01.md
+new file mode 100644
+index 0000000..8e476dd
+--- /dev/null
++++ b/doc/AUDIT_2026-10-01.md
+@@ -0,0 +1,100 @@
++# QuantumWuxia — Progress Audit
++
++**Date:** 2026-10-01 · **Baseline audited:** `main` at `e4d9554` (after PR #25, Phase 5.3)
++**Method:** read `doc/*`, cloned the repo, ran `typecheck`, `test:simulation`, `build`, and the test files CI does not run; traced the store → pipeline → resolver → narrator path by hand.
++
++## 1. Verdict
++
++The **architecture is sound and unusually disciplined for a prototype**: a deterministic resolver behind one visible boundary, injectable rolls, a machine-readable event ledger, bounded NPC agency, and a genuine world-truth / player-knowledge split. The design docs are coherent and the code mostly honours them.
++
++But on `main` today **the project does not typecheck, does not build under `tsc`, and every simulation test fails** — a single missing `{` in `validateState.ts` — and the live game does not yet exercise most of the simulation, because the world a player actually plays in is **a single location** with no Wuxia content. The engine is ahead of the game.
++
++| Check | `main` as found | After this patch |
++|---|---|---|
++| `npm run typecheck` | **fail** (syntax error, then a type error) | pass |
++| `npm run test:simulation` | **fail** (suite cannot load) | **49 / 49 pass** |
++| `npm run build` | fail | pass |
++| Causality v3/v4/v5 tests | never executed by CI; the 4 Jianghu suites crash on load | run in CI, 18 / 18 |
++
++## 2. What is genuinely good
++
++- **The simulation contract is real, not aspirational.** `resolveAction` clones input, range-checks the roll, validates state before and after, and returns structured events + ledger entries. The test suite proves non-mutation and determinism.
++- **One boundary** (`simulationBoundary.ts`) with adapters kept narrow, and an explicit, documented list of compatibility shortcuts (`constitution ← strength`, `mana ↔ Qi`).
++- **Knowledge discipline**: NPC knowledge context is restricted to authored/witnessed/granted ledger entries; investigation agency reads NPC-known rumors, not global truth. This is the hardest pillar to get right and it is done well.
++- **Bounded simulation** (3 NPC actions/tick, one causal step per chain per turn) prevents runaway cost.
++- Docs record *decisions and non-goals*, not just features.
++
++## 3. Defects found and fixed in this patch
++
++| # | Defect | Impact | Fix |
++|---|---|---|---|
++| 1 | `validateState.ts`: `for (...)` over `c.attributes` missing its `{` | Syntax error: typecheck, vite build and **all** simulation tests fail on `main` | Added the brace |
++| 2 | `eventLedger.ts`: `causalLinks` inferred as `(string\|number\|boolean\|null)[]` | Type error after #1 | `flatMap` that narrows to `string` |
++| 3 | Tests not in CI: `jianghu*.test.ts` use global `test`/`expect` that no runner provides; `npm run test:simulation` only globs `test/simulation/` | **Causality v3, v4 and v5 had zero running coverage** while the v3, v4 and v5 plans each list tests as added | Import `node:test`, add a 25-line `expect` shim (`test/support/expect.ts`) over `node:assert`, widen the npm glob |
++| 4 | `ensureChain` only matched **active** chains | A completed chain respawned while its event stayed active: same chain id ×4, faction tension 10 → **34** over 14 turns (intended: 16) | Match completed chains too; test asserts exactly one chain, completes once |
++| 5 | `inferGoal` regex took the *first* "to" | "travel to mountain quietly **to** find…" → goal "mountain quietly to find…" | Skip a "to" followed by a known location/NPC |
++| 6 | Contract required every `targetId` to be an NPC, but `inspect` targets places | A test (and the `inspect` design) failed | `inspect` may target a known location |
++| 7 | `resolveAction` **threw** on an unknown travel destination, so its own `blocked` branch was dead code | Free-text "go somewhere unknown" would crash a turn instead of returning `blocked` | Unknown destination is now `blocked` |
++
++**Three behaviour decisions I made that you may want to reverse:** (a) a causal chain is registered on first sighting and first advances the *next* turn — I kept the code's behaviour and updated two tests to it; (b) widened `inspect` targets (item 6); (c) unknown travel is `blocked`, not an exception (item 7). `src/engine/resolveAction.test.ts` is a stale pre-contract script, still not in CI; it is superseded by `test/simulation/` and can be deleted.
++
++## 4. Remaining findings (not fixed), by priority
++
++### P1 — The live game is not yet the simulation
++
++1. **The playable world is one room.** In live play `locationIds` is seeded from `[gameState.location]` (`actionPipeline.ts` → `simulationMigration.ts`), so every `travel` is blocked; `createDefaultJianghu` also places *every* NPC at the player's start. Markets, rumors, factions' territory and travel goals have nowhere to happen.
++2. **Character creation is generic fantasy.** Warrior/Rogue/Mage/Paladin and Human/Elf/Dwarf; the fallback opening location is `'Dungeon Cell'`; the Wuxia identity exists only in the narrator prompt. The `Spellbook` screen is mana-based, contradicting "Qi is not mana".
++3. **The narrator is told almost nothing about what happened.** It receives `[Resolved action: success] The action succeeds; the narrator may now describe…` — not the events or ledger. It cannot describe real consequences, which invites exactly the invention the prompt forbids.
++4. **Randomness is not injectable at the product level.** `resolvePlayerAction` defaults the roll to `Math.random()`; no seed is stored, so a bug report cannot be replayed (Bible §4). `Combat.tsx` is a **separate legacy combat system** with its own `Math.random` and no engine imports — a second source of truth. `revive()` still mutates legacy and simulation state separately (already tracked in the workplan).
++5. **AI boundary is only half built.** No runtime schema validation (`parseLLMResponse` trusts `parsed.choices`); no separate intent-interpreter / choice-generator contracts; the opening scene accepts an unvalidated LLM `locationChange`. Intent interpretation is keyword-based, so "bribe the guard" becomes `other`, and `inferTarget` needs the *full* NPC name ("Elder Bai" does not match "Elder Bai Qingshan").
++
++### P2 — Depth gaps against the Game Bible
++
++6. **The resolver is thin.** Difficulty is a table by action kind; `attack` has no opponent, damage or injuries beyond one backlash on a high-risk failure; HP never decreases, so defeat/death (§7) cannot occur. `techniqueId`, martial-art mastery, rank, and Qi cost (`qiCost` defaults to 0 for every kind) are never consulted.
++7. **Travel has no distance.** Only "does the id exist"; fixed `timeCost`. (The new content pack provides a weighted graph for this.)
++8. **"The world acts while you are elsewhere" is partial.** Rumor propagation and market updates key off the *player's* location; NPC agency does move NPCs and trade at their own locations.
++9. **Cultivation is nearly inert**: stage, meridian integrity and bottleneck only affect Qi recovery; no advancement mechanic.
++
++### P3 — Hygiene
++
++10. README and several docs still describe "Realm of Echoes"; `IMPLEMENTATION_PLAN_SIMULATION_CORE_V1.md` points at `src/engine/simulation-core-v1/`, which does not exist; the Bible's target folders (`src/world/…`, `src/character/…`, `src/ai/…`) are not followed yet (this patch starts `src/world/content/`).
++11. Five `SESSION*_SUMMARY.md` files and `COMPLETE_SUMMARY.md` at the repo root duplicate `doc/`; `package.json` name is `sandbox-workspace`; `MartialArtType` contains a typo, `'qinqong'` (kept in the content pack to stay compatible — rename to `qinggong` when convenient); `placeholder.md` files remain.
++12. Workplan §11 acceptance boxes are still unchecked although the first three (typecheck, build, engine tests) are now satisfied.
++
++## 5. Content added (the "enrichment")
++
++New folder `src/world/content/`, pure data + pure builders, no React/Zustand/LLM dependencies:
++
++| File | Contents |
++|---|---|
++| `locations.ts` | 10 locations of the **Nine Rivers Jianghu** with a weighted travel graph, terrain, inspectable features, hazards; `travelDays()` |
++| `martialArts.ts` | 9 arts with techniques, lineage, requirements, counters, risks, mutual incompatibilities; `instantiateArt()` |
++| `fantasyLayer.ts` | Declares the supernatural layer per Bible §3: presets `pure_wuxia`, `hidden_arcana`, `living_legends` |
++| `jianghuSeed.ts` | 6 factions + relations, 12 NPCs (goals, fears, **secrets**, dialogue voice), NPC relationships, 3 obligations, 6 rumors (true / distorted / false), 3 world events, 4 markets; `createWuxiaJianghu()` |
++| `origins.ts` | 6 origins, each with a hook and **five contextual opening choices** |
++| `index.ts` | `createWuxiaSimulation(originId, fantasyPreset)` → a complete, valid `SimulationState` |
++
++**Designed story engine, not a plot.** The seed plants interlocking tensions and lets the simulation resolve them: Jade Hall's missing final sword volume (Elder Bai suspects the disciple who actually took it, Gu Wen; the street informant saw a Jade Hall robe); the Ferry Toll Dispute (the toll funds bribes to Marshal Zhao, who skims grain, which a rumor distorts into "selling to bandits"); a healer whose Crimson Lotus past is a low-credibility rumor; a needle-master who needs the Sunken Archive's codex to save her sister. Every secret is stored as NPC state, so the narrator can only reveal it through the knowledge system.
++
++**Fantasy is a switch, not a default.** `pure_wuxia` removes the fox-spirit ferry singer, the immortal archivist, two locations, two rumors, one origin and the Foxfire art; `living_legends` restores them. Spirit arts are a distinct tradition and declared incompatible with Nine-Bell Breathing, never reusing Qi rules.
++
++**Tests** (`test/simulation/wuxia-content.test.ts`, run by CI): all cross-references resolve; travel graph connected & symmetric; art incompatibilities mutual; builders deterministic and copy-isolated; fantasy gating; every origin's start state validates; **every opening choice × 3 rolls runs through the real interpreter and resolver** without mutating input or invalidating state; a 25-turn scripted campaign is reproducible.
++
++## 6. Recommended next steps
++
++1. **Wire the world in (small, high value).** On new game, build the simulation with `createWuxiaSimulation(origin)` and store it as `gameState.simulation`; `ensureSimulationState` already honours an existing valid state. This fixes findings 1 and 2 without touching the resolver.
++2. **Replace the Warrior/Mage/Elf creation screen** with an origin picker over `ORIGINS`; show its five opening choices on turn 1.
++3. **Give the narrator the ledger.** Pass a compact digest of this turn's events (and only player-known ones) instead of a generic summary.
++4. **Seed the RNG** and store the seed + roll in the ledger so any turn is replayable; migrate `Combat.tsx` onto an engine `attack` that actually has opponents, damage and injuries.
++5. **Make the resolver use the content**: techniques and Qi costs, art mastery/counters, travel distance from `TRAVEL_EDGES`, injury consequences — each as a tested, ledger-emitting rule.
++6. **Add schema validation** (a small hand-rolled validator is enough) for LLM output and an LLM-assisted intent interpreter that only proposes a `ProposedAction`.
++7. Delete or archive the stale scripts/summaries and update the README.
++
++## 7. Follow-up applied: the authored world is now the live game
++
++- `Character` gains optional `originId` / `fantasyPreset`.
++- `CharacterCreation` is now a two-step flow (name + supernatural level, then one of the origins) instead of Human/Elf/Dwarf × Warrior/Mage.
++- `startNewGame` builds the simulation with `createWuxiaSimulation`, starts at the origin's location, and always uses the five authored opening choices. The LLM only narrates the opening (`generateCharacterIntro` takes an optional authored `scenario`) and cannot move the player or replace the choices. Demo mode and the connection-failure fallback use the authored opening instead of 'Dungeon Cell'.
++- New tests: opening/legacy-character consistency for every origin, and a real travel step from every origin's start (previously impossible in live play).
++
++Findings 1 and 2 in §4 are resolved. Still open: 3 (narrator digest), 4 (seeded RNG, legacy Combat), 5 (LLM schema validation; later-turn `locationChange` is still applied unvalidated), and the legacy HP/mana vs simulation HP/Qi duplication.
+diff --git a/package.json b/package.json
+index ae15474..e9d7dad 100644
+--- a/package.json
++++ b/package.json
+@@ -6,7 +6,7 @@
+     "dev": "vite",
+     "build": "vite build",
+     "typecheck": "tsc --noEmit",
+-    "test:simulation": "tsx --test test/simulation/*.test.ts"
++    "test:simulation": "tsx --test test/simulation/*.test.ts src/engine/jianghu*.test.ts src/engine/npc*.test.ts src/engine/wuxia.test.ts src/engine/actionPipeline.test.ts"
+   },
+   "dependencies": {
+     "@dnd-kit/core": "^6.1.0",
+diff --git a/src/components/CharacterCreation.tsx b/src/components/CharacterCreation.tsx
+index ea4f150..bd355f1 100644
+--- a/src/components/CharacterCreation.tsx
++++ b/src/components/CharacterCreation.tsx
+@@ -1,151 +1,96 @@
+ import { useState } from 'react';
+-import { Character, InventoryItem } from '../types/game';
+ import { v4 as uuidv4 } from 'uuid';
++import { Sparkles, Sword, Dices } from 'lucide-react';
+ import { useGameStore } from '../store/gameStore';
+-import { Sword, Shield, Sparkles, Heart, Star, Dices } from 'lucide-react';
++import { FANTASY_PRESETS, createOriginCharacter, originsFor, supernaturalEnabled } from '../world/content';
+ 
+-const CLASSES = [
+-  { name: 'Warrior', icon: '⚔️', description: 'Masters of combat with high strength and endurance', baseStats: { strength: 8, agility: 4, intelligence: 3, charisma: 4, luck: 3 } },
+-  { name: 'Rogue', icon: '🗡️', description: 'Cunning fighters who rely on agility and stealth', baseStats: { strength: 4, agility: 8, intelligence: 5, charisma: 4, luck: 5 } },
+-  { name: 'Mage', icon: '🔮', description: 'Wielders of arcane power with vast knowledge', baseStats: { strength: 2, agility: 3, intelligence: 9, charisma: 4, luck: 4 } },
+-  { name: 'Ranger', icon: '🏹', description: 'Skilled hunters and trackers of the wilderness', baseStats: { strength: 5, agility: 7, intelligence: 4, charisma: 3, luck: 5 } },
+-  { name: 'Paladin', icon: '🛡️', description: 'Holy warriors who protect the innocent', baseStats: { strength: 7, agility: 3, intelligence: 4, charisma: 7, luck: 3 } },
+-  { name: 'Bard', icon: '🎵', description: 'Charismatic performers who inspire and deceive', baseStats: { strength: 3, agility: 5, intelligence: 5, charisma: 9, luck: 5 } },
+-];
++type PresetId = keyof typeof FANTASY_PRESETS;
+ 
+-const RACES = [
+-  { name: 'Human', icon: '👤', description: 'Versatile and adaptable', bonus: 'All stats +1' },
+-  { name: 'Elf', icon: '🧝', description: 'Graceful and long-lived', bonus: 'Agility +2, Intelligence +1' },
+-  { name: 'Dwarf', icon: '⛏️', description: 'Stout and resilient', bonus: 'Strength +2, Luck +1' },
+-  { name: 'Halfling', icon: '🍀', description: 'Small but surprisingly brave', bonus: 'Luck +3, Charisma +1' },
+-  { name: 'Dragonborn', icon: '🐉', description: 'Proud descendants of dragons', bonus: 'Strength +2, Charisma +2' },
+-  { name: 'Tiefling', icon: '😈', description: 'Bearer of infernal heritage', bonus: 'Intelligence +2, Charisma +2' },
+-];
+-
+-const BACKGROUNDS = [
+-  'Orphaned at a young age, raised by a mysterious hermit in the mountains.',
+-  'Former soldier who deserted after witnessing the horrors of war.',
+-  'Apprentice to a renowned master who was recently murdered.',
+-  'Noble-born but chose adventure over a life of luxury.',
+-  'Survived a shipwreck and washed ashore with nothing but memories.',
+-  'Grew up on the streets, learning to survive by wit and cunning.',
+-  'Descended from a long line of adventurers, seeking to uphold the family legacy.',
+-  'A scholar who discovered an ancient text that set them on a path of adventure.',
+-];
++const PRESET_COPY: Record<PresetId, { title: string; description: string }> = {
++  pure_wuxia: { title: 'Pure Wuxia', description: 'Martial skill, trickery and superstition only. No supernatural elements.' },
++  hidden_arcana: { title: 'Hidden Arcana', description: 'Illusion arts and cursed texts exist, but proof is rare and costly.' },
++  living_legends: { title: 'Living Legends', description: 'Spirits, relics and moonwell visions are real, and every power has a price.' },
++};
+ 
+ export default function CharacterCreation() {
+   const { startNewGame, settings } = useGameStore();
+   const [step, setStep] = useState(1);
+   const [name, setName] = useState('');
+-  const [selectedClass, setSelectedClass] = useState(CLASSES[0]);
+-  const [selectedRace, setSelectedRace] = useState(RACES[0]);
+-  const [selectedBackground, setSelectedBackground] = useState(BACKGROUNDS[0]);
++  const [presetId, setPresetId] = useState<PresetId>('living_legends');
++  const origins = originsFor(supernaturalEnabled(FANTASY_PRESETS[presetId]));
++  const [originId, setOriginId] = useState(origins[0].id);
+   const [isCreating, setIsCreating] = useState(false);
+ 
+-  const rollStats = () => {
+-    const base = selectedClass.baseStats;
+-    const rolled = {
+-      strength: Math.max(1, base.strength + Math.floor(Math.random() * 3) - 1),
+-      agility: Math.max(1, base.agility + Math.floor(Math.random() * 3) - 1),
+-      intelligence: Math.max(1, base.intelligence + Math.floor(Math.random() * 3) - 1),
+-      charisma: Math.max(1, base.charisma + Math.floor(Math.random() * 3) - 1),
+-      luck: Math.max(1, base.luck + Math.floor(Math.random() * 3) - 1),
+-    };
+-    
+-    // Apply race bonuses
+-    if (selectedRace.name === 'Human') {
+-      rolled.strength += 1; rolled.agility += 1; rolled.intelligence += 1; rolled.charisma += 1; rolled.luck += 1;
+-    } else if (selectedRace.name === 'Elf') {
+-      rolled.agility += 2; rolled.intelligence += 1;
+-    } else if (selectedRace.name === 'Dwarf') {
+-      rolled.strength += 2; rolled.luck += 1;
+-    } else if (selectedRace.name === 'Halfling') {
+-      rolled.luck += 3; rolled.charisma += 1;
+-    } else if (selectedRace.name === 'Dragonborn') {
+-      rolled.strength += 2; rolled.charisma += 2;
+-    } else if (selectedRace.name === 'Tiefling') {
+-      rolled.intelligence += 2; rolled.charisma += 2;
+-    }
+-    
+-    return rolled;
++  const selectedOrigin = origins.find(o => o.id === originId) ?? origins[0];
++
++  const choosePreset = (id: PresetId) => {
++    setPresetId(id);
++    const available = originsFor(supernaturalEnabled(FANTASY_PRESETS[id]));
++    if (!available.some(o => o.id === originId)) setOriginId(available[0].id);
+   };
+ 
+   const handleCreate = async () => {
+     setIsCreating(true);
+-    const stats = rollStats();
+-    
+-    const character: Character = {
+-      id: uuidv4(),
+-      name: name || 'Unknown Hero',
+-      class: selectedClass.name,
+-      race: selectedRace.name,
+-      level: 1,
+-      experience: 0,
+-      stats: {
+-        ...stats,
+-        maxHp: 20 + stats.strength * 2,
+-        currentHp: 20 + stats.strength * 2,
+-        maxMana: 10 + stats.intelligence * 2,
+-        currentMana: 10 + stats.intelligence * 2,
+-      },
+-      skills: [],
+-      inventory: getStartingEquipment(selectedClass.name),
+-      gold: 10 + stats.luck * 2,
+-      background: selectedBackground,
+-    };
+-    
+-    await startNewGame(character);
++    await startNewGame(createOriginCharacter(selectedOrigin, name, uuidv4(), presetId));
+     setIsCreating(false);
+   };
+ 
++  const cardClass = (selected: boolean) =>
++    `p-4 rounded-xl border-2 transition-all text-left ${
++      selected ? 'border-amber-500 bg-amber-500/10' : 'border-gray-700 bg-gray-900/30 hover:border-gray-500'
++    }`;
++
+   return (
+     <div className="min-h-screen bg-gradient-to-b from-gray-900 via-purple-900/20 to-gray-900 flex items-center justify-center p-4">
+       <div className="max-w-4xl w-full">
+-        {/* Title */}
+         <div className="text-center mb-8">
+           <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-purple-500 mb-2">
+-            ⚔️ Realm of Echoes ⚔️
++            QuantumWuxia
+           </h1>
+-          <p className="text-gray-400 text-lg">An AI-Powered Text RPG Adventure</p>
++          <p className="text-gray-400 text-lg">An AI-narrated Wuxia simulation in the Nine Rivers Jianghu</p>
+           <p className="text-gray-500 text-sm mt-1">
+             LLM: {settings.llmConfig.provider} / {settings.llmConfig.model}
+           </p>
+         </div>
+ 
+-        {/* Progress Steps */}
+         <div className="flex justify-center mb-8 gap-2">
+-          {[1, 2, 3, 4].map((s) => (
+-            <div
+-              key={s}
+-              className={`h-2 w-16 rounded-full transition-all ${
+-                s <= step ? 'bg-amber-500' : 'bg-gray-700'
+-              }`}
+-            />
++          {[1, 2].map(s => (
++            <div key={s} className={`h-2 w-16 rounded-full transition-all ${s <= step ? 'bg-amber-500' : 'bg-gray-700'}`} />
+           ))}
+         </div>
+ 
+-        {/* Step Content */}
+         <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl p-8 shadow-2xl">
+           {step === 1 && (
+             <div className="space-y-6">
+               <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+-                <Sparkles className="text-amber-400" /> Create Your Hero
++                <Sparkles className="text-amber-400" /> Name and World
+               </h2>
+               <div>
+                 <label className="block text-gray-300 mb-2">Character Name</label>
+                 <input
+                   type="text"
+                   value={name}
+-                  onChange={(e) => setName(e.target.value)}
+-                  placeholder="Enter your hero's name..."
++                  onChange={e => setName(e.target.value)}
++                  placeholder="Enter your name..."
+                   className="w-full bg-gray-900/50 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500 transition-colors"
+                 />
+               </div>
++              <div>
++                <label className="block text-gray-300 mb-2">How much of the supernatural?</label>
++                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
++                  {(Object.keys(PRESET_COPY) as PresetId[]).map(id => (
++                    <button key={id} onClick={() => choosePreset(id)} className={cardClass(presetId === id)}>
++                      <div className="font-bold text-white">{PRESET_COPY[id].title}</div>
++                      <div className="text-xs text-gray-400 mt-1">{PRESET_COPY[id].description}</div>
++                    </button>
++                  ))}
++                </div>
++              </div>
+               <button
+                 onClick={() => setStep(2)}
+-                className="w-full bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-[1.02]"
++                className="w-full bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold py-3 rounded-lg transition-all"
+               >
+-                Next: Choose Your Race →
++                Next: Choose Your Origin →
+               </button>
+             </div>
+           )}
+@@ -153,121 +98,31 @@ export default function CharacterCreation() {
+           {step === 2 && (
+             <div className="space-y-6">
+               <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+-                <Heart className="text-red-400" /> Choose Your Race
+-              </h2>
+-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+-                {RACES.map((race) => (
+-                  <button
+-                    key={race.name}
+-                    onClick={() => setSelectedRace(race)}
+-                    className={`p-4 rounded-xl border-2 transition-all text-left ${
+-                      selectedRace.name === race.name
+-                        ? 'border-amber-500 bg-amber-500/10'
+-                        : 'border-gray-700 bg-gray-900/30 hover:border-gray-500'
+-                    }`}
+-                  >
+-                    <div className="text-3xl mb-2">{race.icon}</div>
+-                    <div className="font-bold text-white">{race.name}</div>
+-                    <div className="text-xs text-gray-400 mt-1">{race.description}</div>
+-                    <div className="text-xs text-amber-400 mt-1">{race.bonus}</div>
+-                  </button>
+-                ))}
+-              </div>
+-              <div className="flex gap-3">
+-                <button
+-                  onClick={() => setStep(1)}
+-                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-lg transition-all"
+-                >
+-                  ← Back
+-                </button>
+-                <button
+-                  onClick={() => setStep(3)}
+-                  className="flex-1 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold py-3 rounded-lg transition-all"
+-                >
+-                  Next: Choose Class →
+-                </button>
+-              </div>
+-            </div>
+-          )}
+-
+-          {step === 3 && (
+-            <div className="space-y-6">
+-              <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+-                <Sword className="text-blue-400" /> Choose Your Class
++                <Sword className="text-blue-400" /> Choose Your Origin
+               </h2>
+-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+-                {CLASSES.map((cls) => (
+-                  <button
+-                    key={cls.name}
+-                    onClick={() => setSelectedClass(cls)}
+-                    className={`p-4 rounded-xl border-2 transition-all text-left ${
+-                      selectedClass.name === cls.name
+-                        ? 'border-amber-500 bg-amber-500/10'
+-                        : 'border-gray-700 bg-gray-900/30 hover:border-gray-500'
+-                    }`}
+-                  >
+-                    <div className="text-3xl mb-2">{cls.icon}</div>
+-                    <div className="font-bold text-white">{cls.name}</div>
+-                    <div className="text-xs text-gray-400 mt-1">{cls.description}</div>
++              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
++                {origins.map(origin => (
++                  <button key={origin.id} onClick={() => setOriginId(origin.id)} className={cardClass(originId === origin.id)}>
++                    <div className="font-bold text-white">
++                      {origin.title} <span className="text-gray-500 font-normal">{origin.zh}</span>
++                    </div>
++                    <div className="text-xs text-gray-400 mt-1">{origin.summary}</div>
++                    <div className="text-xs text-amber-400 mt-2">{origin.startLocationId}</div>
+                   </button>
+                 ))}
+               </div>
+-              <div className="flex gap-3">
+-                <button
+-                  onClick={() => setStep(2)}
+-                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-lg transition-all"
+-                >
+-                  ← Back
+-                </button>
+-                <button
+-                  onClick={() => setStep(4)}
+-                  className="flex-1 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold py-3 rounded-lg transition-all"
+-                >
+-                  Next: Background →
+-                </button>
+-              </div>
+-            </div>
+-          )}
+-
+-          {step === 4 && (
+-            <div className="space-y-6">
+-              <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+-                <Star className="text-purple-400" /> Your Background
+-              </h2>
+-              <div className="space-y-2">
+-                {BACKGROUNDS.map((bg) => (
+-                  <button
+-                    key={bg}
+-                    onClick={() => setSelectedBackground(bg)}
+-                    className={`w-full p-3 rounded-lg border-2 transition-all text-left ${
+-                      selectedBackground === bg
+-                        ? 'border-amber-500 bg-amber-500/10'
+-                        : 'border-gray-700 bg-gray-900/30 hover:border-gray-500'
+-                    }`}
+-                  >
+-                    <div className="text-sm text-gray-300">{bg}</div>
+-                  </button>
+-                ))}
+-              </div>
+-              
+-              {/* Character Summary */}
+               <div className="bg-gray-900/50 rounded-xl p-4 border border-gray-700">
+                 <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+-                  <Dices className="text-amber-400" /> Character Summary
++                  <Dices className="text-amber-400" /> The Situation
+                 </h3>
+-                <div className="grid grid-cols-2 gap-2 text-sm">
+-                  <div className="text-gray-400">Name:</div>
+-                  <div className="text-white">{name || 'Unknown Hero'}</div>
+-                  <div className="text-gray-400">Race:</div>
+-                  <div className="text-white">{selectedRace.icon} {selectedRace.name}</div>
+-                  <div className="text-gray-400">Class:</div>
+-                  <div className="text-white">{selectedClass.icon} {selectedClass.name}</div>
+-                </div>
++                <p className="text-sm text-gray-300">{selectedOrigin.hook}</p>
++                <p className="text-xs text-gray-500 mt-2">
++                  {name.trim() || 'Wanderer'} · {PRESET_COPY[presetId].title}
++                </p>
+               </div>
+-
+               <div className="flex gap-3">
+                 <button
+-                  onClick={() => setStep(3)}
++                  onClick={() => setStep(1)}
+                   className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-lg transition-all"
+                 >
+                   ← Back
+@@ -275,9 +130,9 @@ export default function CharacterCreation() {
+                 <button
+                   onClick={handleCreate}
+                   disabled={isCreating}
+-                  className="flex-1 bg-gradient-to-r from-purple-600 to-amber-500 hover:from-purple-500 hover:to-amber-400 text-white font-bold py-3 rounded-lg transition-all transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
++                  className="flex-1 bg-gradient-to-r from-purple-600 to-amber-500 hover:from-purple-500 hover:to-amber-400 text-white font-bold py-3 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                 >
+-                  {isCreating ? '⏳ Generating World...' : '🎲 Begin Adventure!'}
++                  {isCreating ? '⏳ Entering the Jianghu...' : 'Begin Journey'}
+                 </button>
+               </div>
+             </div>
+@@ -287,43 +142,3 @@ export default function CharacterCreation() {
+     </div>
+   );
+ }
+-
+-function getStartingEquipment(className: string): InventoryItem[] {
+-  const equipment: Record<string, InventoryItem[]> = {
+-    Warrior: [
+-      { id: uuidv4(), name: 'Iron Sword', type: 'weapon', description: 'A sturdy iron blade', quantity: 1, value: 25 },
+-      { id: uuidv4(), name: 'Leather Armor', type: 'armor', description: 'Basic leather protection', quantity: 1, value: 15 },
+-      { id: uuidv4(), name: 'Health Potion', type: 'potion', description: 'Restores 20 HP', quantity: 2, value: 10 },
+-    ],
+-    Rogue: [
+-      { id: uuidv4(), name: 'Sharp Dagger', type: 'weapon', description: 'A keen-edged dagger', quantity: 1, value: 20 },
+-      { id: uuidv4(), name: 'Lockpicks', type: 'misc', description: 'A set of fine lockpicks', quantity: 1, value: 15 },
+-      { id: uuidv4(), name: 'Health Potion', type: 'potion', description: 'Restores 20 HP', quantity: 1, value: 10 },
+-    ],
+-    Mage: [
+-      { id: uuidv4(), name: 'Wooden Staff', type: 'weapon', description: 'A channeling focus', quantity: 1, value: 20 },
+-      { id: uuidv4(), name: 'Spellbook', type: 'misc', description: 'Contains basic spells', quantity: 1, value: 30 },
+-      { id: uuidv4(), name: 'Mana Potion', type: 'potion', description: 'Restores 15 Mana', quantity: 2, value: 12 },
+-    ],
+-    Ranger: [
+-      { id: uuidv4(), name: 'Short Bow', type: 'weapon', description: 'A compact hunting bow', quantity: 1, value: 20 },
+-      { id: uuidv4(), name: 'Arrows', type: 'misc', description: 'A quiver of arrows', quantity: 1, value: 10 },
+-      { id: uuidv4(), name: 'Health Potion', type: 'potion', description: 'Restores 20 HP', quantity: 2, value: 10 },
+-    ],
+-    Paladin: [
+-      { id: uuidv4(), name: 'Blessed Mace', type: 'weapon', description: 'A holy weapon', quantity: 1, value: 30 },
+-      { id: uuidv4(), name: 'Chain Mail', type: 'armor', description: 'Interlocking metal rings', quantity: 1, value: 25 },
+-      { id: uuidv4(), name: 'Health Potion', type: 'potion', description: 'Restores 20 HP', quantity: 2, value: 10 },
+-    ],
+-    Bard: [
+-      { id: uuidv4(), name: 'Lute', type: 'weapon', description: 'A well-crafted instrument', quantity: 1, value: 20 },
+-      { id: uuidv4(), name: 'Disguise Kit', type: 'misc', description: 'For changing appearance', quantity: 1, value: 15 },
+-      { id: uuidv4(), name: 'Health Potion', type: 'potion', description: 'Restores 20 HP', quantity: 1, value: 10 },
+-    ],
+-  };
+-  
+-  return equipment[className] || [
+-    { id: uuidv4(), name: 'Worn Sword', type: 'weapon', description: 'A basic blade', quantity: 1, value: 10 },
+-    { id: uuidv4(), name: 'Health Potion', type: 'potion', description: 'Restores 20 HP', quantity: 1, value: 10 },
+-  ];
+-}
+diff --git a/src/engine/actionContract.ts b/src/engine/actionContract.ts
+index 43261cd..f2e7acd 100644
+--- a/src/engine/actionContract.ts
++++ b/src/engine/actionContract.ts
+@@ -131,11 +131,14 @@ export function validateProposedAction(
+   }
+ 
+   if (action.targetId !== undefined) {
+-    const targetExists = state.jianghu?.npcs.some(npc => npc.id === action.targetId) ?? false;
++    const targetExists =
++      (state.jianghu?.npcs.some(npc => npc.id === action.targetId) ?? false) ||
++      // Inspecting a place is legal; every other action still needs a person.
++      (action.kind === 'inspect' && state.world.locationIds.includes(action.targetId));
+     if (!targetExists) {
+       issues.push({
+         path: 'targetId',
+-        message: 'Target must reference a known Jianghu NPC.',
++        message: 'Target must reference a known Jianghu NPC (or a known location when inspecting).',
+       });
+     }
+   }
+diff --git a/src/engine/actionInterpreter.ts b/src/engine/actionInterpreter.ts
+index 59a403a..ef158bf 100644
+--- a/src/engine/actionInterpreter.ts
++++ b/src/engine/actionInterpreter.ts
+@@ -40,9 +40,21 @@ function inferTechnique(text: string): string | undefined {
+   return match?.[1]?.trim();
+ }
+ 
+-function inferGoal(text: string): string | undefined {
+-  const match = text.match(/(?:to|so that|in order to)\s+(.+)$/i);
+-  return match?.[1]?.trim();
++function inferGoal(text: string, simulation: SimulationState): string | undefined {
++  // "to" also introduces destinations ("travel to mountain"), so skip matches
++  // whose remainder starts with a known location or NPC name.
++  const knownNames = [
++    ...simulation.world.locationIds,
++    ...(simulation.jianghu?.npcs.map(npc => npc.name) ?? []),
++  ].map(name => name.toLowerCase());
++  // Markers only (no greedy tail) so overlapping "to ... to ..." occurrences are all visited.
++  for (const marker of text.matchAll(/(?:in order to|so that|\bto)\s+/gi)) {
++    const rest = text.slice((marker.index ?? 0) + marker[0].length).trim();
++    if (!rest) continue;
++    if (knownNames.some(name => rest.toLowerCase().startsWith(name))) continue;
++    return rest;
++  }
++  return undefined;
+ }
+ 
+ function inferConditionalClauses(text: string): string[] | undefined {
+@@ -76,7 +88,7 @@ export function interpretPlayerAction(
+     : undefined;
+   const approach = inferApproach(lower);
+   const techniqueId = kind === 'attack' || kind === 'meditate' ? inferTechnique(lower) : undefined;
+-  const intendedGoal = inferGoal(normalized);
++  const intendedGoal = inferGoal(normalized, simulation);
+   const conditionalClauses = inferConditionalClauses(lower);
+   const declaredConstraints = inferDeclaredConstraints(lower);
+ 
+diff --git a/src/engine/eventLedger.ts b/src/engine/eventLedger.ts
+index df11174..d1c01f7 100644
+--- a/src/engine/eventLedger.ts
++++ b/src/engine/eventLedger.ts
+@@ -48,9 +48,9 @@ export function createEventLedger(
+           ? ['rumor.spread']
+           : [];
+ 
+-    const causalLinks = Object.entries(event.payload)
+-      .filter(([key, value]) => /cause|causal|chain/i.test(key) && typeof value === 'string')
+-      .map(([, value]) => value);
++    const causalLinks = Object.entries(event.payload).flatMap(([key, value]) =>
++      /cause|causal|chain/i.test(key) && typeof value === 'string' ? [value] : [],
++    );
+ 
+     return {
+       eventId: `t${state.world.turn}-${state.ledger.length + index + 1}-${event.type}`,
+diff --git a/src/engine/jianghu.test.ts b/src/engine/jianghu.test.ts
+index a2252d4..922ecec 100644
+--- a/src/engine/jianghu.test.ts
++++ b/src/engine/jianghu.test.ts
+@@ -1,3 +1,5 @@
++import test from 'node:test';
++import { expect } from '../../test/support/expect';
+ import { applyJianghuAction, createDefaultJianghu, createRumor, tickJianghu } from './jianghu';
+ import { createDefaultWuxiaCharacter } from './wuxia';
+ import type { ProposedAction, SimulationState } from './types';
+diff --git a/src/engine/jianghuCausalityV3.test.ts b/src/engine/jianghuCausalityV3.test.ts
+index daf4989..51f65cc 100644
+--- a/src/engine/jianghuCausalityV3.test.ts
++++ b/src/engine/jianghuCausalityV3.test.ts
+@@ -1,3 +1,5 @@
++import test from 'node:test';
++import { expect } from '../../test/support/expect';
+ import { applyCausalityV3, createObligation } from './jianghuCausalityV3';
+ import { createDefaultJianghu } from './jianghu';
+ import type { SimulationState } from './types';
+diff --git a/src/engine/jianghuCausalityV5.test.ts b/src/engine/jianghuCausalityV5.test.ts
+index 5ed4c93..66cea8b 100644
+--- a/src/engine/jianghuCausalityV5.test.ts
++++ b/src/engine/jianghuCausalityV5.test.ts
+@@ -1,3 +1,5 @@
++import test from 'node:test';
++import { expect } from '../../test/support/expect';
+ import { advanceCausalityV5 } from './jianghuCausalityV5';
+ import { createDefaultJianghu } from './jianghu';
+ import type { SimulationState } from './types';
+diff --git a/src/engine/jianghuInformationV4.test.ts b/src/engine/jianghuInformationV4.test.ts
+index 6c9546d..cc9b977 100644
+--- a/src/engine/jianghuInformationV4.test.ts
++++ b/src/engine/jianghuInformationV4.test.ts
+@@ -1,8 +1,10 @@
++import test from 'node:test';
++import { expect } from '../../test/support/expect';
+ import { advanceCausalChains, processInformation, recordKnowledge } from './jianghuInformationV4';
+ import { createDefaultJianghu, createRumor } from './jianghu';
+ import type { SimulationState } from './types';
+ 
+-function state(): SimulationState {
++function state(turn = 5): SimulationState {
+   return {
+     schemaVersion: 1,
+     ledger: [],
+@@ -11,7 +13,7 @@ function state(): SimulationState {
+       attributes: { strength: 10, agility: 10, constitution: 10, perception: 10, intelligence: 10, charisma: 10, luck: 10 },
+       conditions: [], inventory: [], locationId: 'The Crossroads',
+     },
+-    world: { turn: 5, locationIds: ['The Crossroads'], knownFacts: [], knownRumorIds: [], knownNpcIds: [] },
++    world: { turn, locationIds: ['The Crossroads'], knownFacts: [], knownRumorIds: [], knownNpcIds: [] },
+   };
+ }
+ 
+@@ -41,23 +43,27 @@ test('active world events advance one causal step per eligible turn', () => {
+     description: 'A rumor is gaining traction.', factionIds: [], severity: 2,
+     active: true, createdTurn: 5, expiresTurn: 9, locationId: 'The Crossroads',
+   });
+-  const result = advanceCausalChains(input, state());
++  // A chain is registered on first sighting and becomes eligible on the next turn.
++  const registered = advanceCausalChains(input, state(5));
++  expect(registered.jianghu.causalChains?.find(c => c.rootEventId === 'event-rumor-1')?.step).toBe(0);
++  const result = advanceCausalChains(registered.jianghu, state(6));
+   const chain = result.jianghu.causalChains?.find(c => c.rootEventId === 'event-rumor-1');
+   expect(chain?.step).toBe(1);
+   expect(result.events.some(e => e.type === 'world.causal_chain_advanced')).toBe(true);
+ });
+ 
+-test('causal chains are bounded and eventually complete', () => {
++test('causal chains are bounded, complete once, and never respawn', () => {
+   let input = createDefaultJianghu();
+   input.worldEvents.push({
+     id: 'event-social-1', kind: 'personal', title: 'Old grievance',
+     description: 'A grievance remains unresolved.', factionIds: [], severity: 1,
+     active: true, createdTurn: 5, expiresTurn: 20, locationId: 'The Crossroads',
+   });
+-  let sim = state();
+-  for (let turn = 5; turn <= 7; turn++) {
+-    sim = { ...sim, world: { ...sim.world, turn } };
+-    input = advanceCausalChains(input, sim).jianghu;
++  for (let turn = 5; turn <= 14; turn++) {
++    input = advanceCausalChains(input, state(turn)).jianghu;
+   }
+-  expect(input.causalChains?.find(c => c.rootEventId === 'event-social-1')?.active).toBe(false);
++  const chains = input.causalChains?.filter(c => c.rootEventId === 'event-social-1') ?? [];
++  expect(chains).toHaveLength(1);
++  expect(chains[0].active).toBe(false);
++  expect(chains[0].step).toBe(3);
+ });
+diff --git a/src/engine/jianghuInformationV4.ts b/src/engine/jianghuInformationV4.ts
+index 5bedad2..ae2415e 100644
+--- a/src/engine/jianghuInformationV4.ts
++++ b/src/engine/jianghuInformationV4.ts
+@@ -109,7 +109,8 @@ export function processInformation(
+ }
+ 
+ function ensureChain(j: JianghuState, eventId: string, kind: CausalChainState['kind'], description: string, turn: number): CausalChainState {
+-  const existing = j.causalChains?.find(c => c.rootEventId === eventId && c.active);
++  // Match completed chains too: a finished chain must not respawn (duplicate id, repeated step-1 effects) while its event stays active.
++  const existing = j.causalChains?.find(c => c.rootEventId === eventId);
+   if (existing) return existing;
+   const chain: CausalChainState = {
+     id: `chain-${eventId}`,
+diff --git a/src/engine/resolveAction.ts b/src/engine/resolveAction.ts
+index 830bd9e..57a1f21 100644
+--- a/src/engine/resolveAction.ts
++++ b/src/engine/resolveAction.ts
+@@ -54,7 +54,11 @@ export function resolveAction(
+   }
+ 
+   const normalizedAction = normalizeProposedAction(input, proposedAction);
+-  const actionIssues = validateProposedAction(input, normalizedAction);
++  // An unknown travel destination is a legal-but-blocked action (handled below),
++  // not a malformed proposal; every other contract issue is still rejected.
++  const actionIssues = validateProposedAction(input, normalizedAction).filter(
++    issue => !(normalizedAction.kind === 'travel' && issue.path === 'destinationId'),
++  );
+   if (actionIssues.length > 0) {
+     throw new Error(`Invalid proposed action: ${actionIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
+   }
+diff --git a/src/engine/validateState.ts b/src/engine/validateState.ts
+index 6dc3f50..c15a147 100644
+--- a/src/engine/validateState.ts
++++ b/src/engine/validateState.ts
+@@ -68,7 +68,7 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
+     }
+   }
+ 
+-  for (const [key, value] of Object.entries(c.attributes))
++  for (const [key, value] of Object.entries(c.attributes)) {
+     if (!Number.isFinite(value) || value < 0) {
+       issues.push({ path: `character.attributes.${key}`, message: 'Attribute must be a finite non-negative number.' });
+     }
+diff --git a/src/services/llmService.ts b/src/services/llmService.ts
+index 88bb29e..ac7fc18 100644
+--- a/src/services/llmService.ts
++++ b/src/services/llmService.ts
+@@ -305,7 +305,8 @@ export async function generateNarrative(
+ export async function generateCharacterIntro(
+   config: LLMConfig,
+   character: Character,
+-  worldTheme: string
++  worldTheme: string,
++  scenario?: string
+ ): Promise<LLMResponse> {
+   const messages = [
+     { role: 'system', content: SYSTEM_PROMPT },
+@@ -317,7 +318,7 @@ Character: ${character.name}, a level 1 ${character.race} ${character.class}.
+ Background: ${character.background}
+ Stats: STR ${character.stats.strength}, AGI ${character.stats.agility}, INT ${character.stats.intelligence}, CHA ${character.stats.charisma}, LCK ${character.stats.luck}
+ Starting equipment: ${character.inventory.map(i => i.name).join(', ') || 'Nothing'}
+-
++${scenario ? `\nAuthored starting scenario (do not contradict it, do not change the location, do not invent new named factions or people; the player's five choices are supplied separately, so "choices" may be an empty array):\n${scenario}\n` : ''}
+ Create an engaging opening scene that introduces the character to the world. Set the mood, describe the surroundings, and present an initial situation that the character must respond to. Respond in valid JSON format.` 
+     },
+   ];
+diff --git a/src/store/gameStore.ts b/src/store/gameStore.ts
+index ecd2953..f4c7071 100644
+--- a/src/store/gameStore.ts
++++ b/src/store/gameStore.ts
+@@ -10,6 +10,8 @@ import { changeTracker } from '../services/changeTracker';
+ import { soundManager } from '../services/soundManager';
+ import { resolvePlayerAction } from '../engine/actionPipeline';
+ import { createSimulationState } from '../engine/simulationAdapter';
++import { FANTASY_PRESETS, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
++import type { SimulationState } from '../engine/types';
+ 
+ interface GameStore {
+   // Game state
+@@ -169,6 +171,20 @@ function getDemoResponse(action: string): LLMResponse {
+   };
+ }
+ 
++/**
++ * For a character created from a Wuxia origin, the authored world decides the
++ * start location, simulation state and the five opening choices. The LLM only
++ * narrates; it cannot move the player or invent the choices.
++ */
++function resolveOriginStart(character: Character) {
++  const origin = character.originId ? findOrigin(character.originId) : undefined;
++  if (!origin) return undefined;
++  const preset = FANTASY_PRESETS[(character.fantasyPreset ?? '') as keyof typeof FANTASY_PRESETS] ?? FANTASY_PRESETS.living_legends;
++  const opening = buildOriginOpening(origin);
++  const simulation: SimulationState = createWuxiaSimulation(origin.id, preset, character.name);
++  return { origin, opening, simulation, scenario: buildOriginScenario(origin) };
++}
++
+ function getDemoOpening(): LLMResponse {
+   const opening = DEMO_OPENINGS[Math.floor(Math.random() * DEMO_OPENINGS.length)];
+   return {
+@@ -239,17 +255,26 @@ export const useGameStore = create<GameStore>()(
+           
+           let response: LLMResponse;
+           
++          const originStart = resolveOriginStart(character);
++          
+           if (isDemo) {
+             // Demo mode - use pre-written content
+-            response = getDemoOpening();
++            response = originStart
++              ? { narrative: originStart.opening.narrative, choices: originStart.opening.choices, stateUpdates: {} }
++              : getDemoOpening();
+             set({ isDemoMode: true });
+           } else {
+             response = await generateCharacterIntro(
+               settings.llmConfig,
+               character,
+-              settings.worldTheme
++              settings.worldTheme,
++              originStart?.scenario
+             );
+           }
++          if (originStart) {
++            // Authored choices and location always win over the LLM's.
++            response = { ...response, choices: originStart.opening.choices, stateUpdates: { ...response.stateUpdates, locationChange: originStart.opening.location } };
++          }
+           
+           const turn: GameTurn = {
+             id: uuidv4(),
+@@ -269,7 +294,7 @@ export const useGameStore = create<GameStore>()(
+               };
+               return {
+                 ...initialState,
+-                simulation: createSimulationState(initialState, [initialState.location]),
++                simulation: originStart?.simulation ?? createSimulationState(initialState, [initialState.location]),
+               };
+             })(),
+             isLoading: false,
+@@ -277,7 +302,10 @@ export const useGameStore = create<GameStore>()(
+           });
+         } catch (error) {
+           // Fall back to demo mode on error
+-          const response = getDemoOpening();
++          const originStart = resolveOriginStart(character);
++          const response: LLMResponse = originStart
++            ? { narrative: originStart.opening.narrative, choices: originStart.opening.choices, stateUpdates: { locationChange: originStart.opening.location } }
++            : getDemoOpening();
+           const turn: GameTurn = {
+             id: uuidv4(),
+             narrative: response.narrative,
+@@ -303,7 +331,7 @@ export const useGameStore = create<GameStore>()(
+               };
+               return {
+                 ...initialState,
+-                simulation: createSimulationState(initialState, [initialState.location]),
++                simulation: originStart?.simulation ?? createSimulationState(initialState, [initialState.location]),
+               };
+             })(),
+           });
+diff --git a/src/types/game.ts b/src/types/game.ts
+index 654c776..3493985 100644
+--- a/src/types/game.ts
++++ b/src/types/game.ts
+@@ -24,6 +24,10 @@ export interface Character {
+   inventory: InventoryItem[];
+   gold: number;
+   background: string;
++  /** Wuxia origin id (src/world/content/origins.ts). When set, the authored world is used. */
++  originId?: string;
++  /** Fantasy-layer preset id (src/world/content/fantasyLayer.ts). */
++  fantasyPreset?: string;
+ }
+ 
+ export interface InventoryItem {
+diff --git a/src/world/content/fantasyLayer.ts b/src/world/content/fantasyLayer.ts
+new file mode 100644
+index 0000000..6f85fc9
+--- /dev/null
++++ b/src/world/content/fantasyLayer.ts
+@@ -0,0 +1,54 @@
++/**
++ * Optional fantasy layer declaration (Game Bible §3: "Each setting should
++ * declare what is possible, rare, forbidden, or impossible").
++ */
++export type MagicLevel = 'none' | 'hidden' | 'rare' | 'common';
++
++export interface FantasyLayerConfig {
++  id: string;
++  magicLevel: MagicLevel;
++  /** Supernatural elements that may appear in this campaign. */
++  possible: string[];
++  /** Elements that exist but are scarce, secret, or dangerous. */
++  rare: string[];
++  /** Elements that never appear, regardless of what narration wants. */
++  impossible: string[];
++  /** Design rules the narrator and world-event proposer must respect. */
++  rules: string[];
++}
++
++export const FANTASY_PRESETS: Record<'pure_wuxia' | 'hidden_arcana' | 'living_legends', FantasyLayerConfig> = {
++  pure_wuxia: {
++    id: 'pure_wuxia', magicLevel: 'none',
++    possible: [], rare: [],
++    impossible: ['spirits', 'demons', 'divine intervention', 'magical relics', 'transformation'],
++    rules: ['Apparent miracles are always martial skill, trickery, poison, or superstition.'],
++  },
++  hidden_arcana: {
++    id: 'hidden_arcana', magicLevel: 'hidden',
++    possible: ['illusion arts', 'cursed texts'],
++    rare: ['spirit-touched places', 'beast spirits in human form'],
++    impossible: ['gods acting openly', 'resurrection', 'spellcasting as a mainstream profession'],
++    rules: [
++      'Most people doubt the supernatural; proof is rare and always costly.',
++      'Supernatural abilities are separate traditions and never reuse Qi cultivation rules.',
++    ],
++  },
++  living_legends: {
++    id: 'living_legends', magicLevel: 'rare',
++    possible: ['spirit arts', 'beast spirits', 'cursed or blessed relics', 'ghosts', 'moonwell visions'],
++    rare: ['fox spirits', 'immortal hermits', 'sealed demons'],
++    impossible: ['instant healing', 'mind control of the player', 'gods overriding simulation results'],
++    rules: [
++      'Supernatural effects are resolved by the same deterministic simulation as martial ones.',
++      'Every supernatural power has a price: lost time, memory, face, or years.',
++      'Qi is not mana; spirit arts are a distinct tradition with their own requirements.',
++    ],
++  },
++};
++
++export const DEFAULT_FANTASY_PRESET = 'living_legends' as const;
++
++export function supernaturalEnabled(config: FantasyLayerConfig): boolean {
++  return config.magicLevel !== 'none';
++}
+diff --git a/src/world/content/index.ts b/src/world/content/index.ts
+new file mode 100644
+index 0000000..4945fbd
+--- /dev/null
++++ b/src/world/content/index.ts
+@@ -0,0 +1,60 @@
++import type { SimulationState } from '../../engine/types';
++import { createDefaultWuxiaCharacter } from '../../engine/wuxia';
++import { DEFAULT_FANTASY_PRESET, FANTASY_PRESETS, supernaturalEnabled, type FantasyLayerConfig } from './fantasyLayer';
++import { createWuxiaJianghu, wuxiaLocationIds } from './jianghuSeed';
++import { instantiateArt } from './martialArts';
++import { ORIGINS, originsFor } from './origins';
++
++export * from './fantasyLayer';
++export * from './jianghuSeed';
++export * from './locations';
++export * from './martialArts';
++export * from './origins';
++
++const BASE_ATTRIBUTE = 10;
++
++/**
++ * Build a complete, valid starting `SimulationState` for an origin, purely from
++ * authored content. This does not touch the legacy `GameState`; wiring it into
++ * character creation is a separate adapter decision.
++ */
++export function createWuxiaSimulation(
++  originId: string,
++  fantasy: FantasyLayerConfig = FANTASY_PRESETS[DEFAULT_FANTASY_PRESET],
++  characterName = 'Wanderer',
++): SimulationState {
++  const origin = originsFor(supernaturalEnabled(fantasy)).find(o => o.id === originId);
++  if (!origin) {
++    throw new Error(`Origin "${originId}" is unknown or requires the supernatural layer: ${ORIGINS.map(o => o.id).join(', ')}`);
++  }
++
++  const base = {
++    id: 'player',
++    name: characterName,
++    hp: 100, maxHp: 100, qi: 40, maxQi: 60, fatigue: 0,
++    attributes: {
++      strength: BASE_ATTRIBUTE, agility: BASE_ATTRIBUTE, constitution: BASE_ATTRIBUTE, perception: BASE_ATTRIBUTE,
++      intelligence: BASE_ATTRIBUTE, charisma: BASE_ATTRIBUTE, luck: BASE_ATTRIBUTE, ...origin.attributes,
++    },
++    conditions: [],
++    inventory: [...origin.inventory],
++    locationId: origin.startLocationId,
++  };
++  const character = createDefaultWuxiaCharacter(base);
++  character.wuxia.martialArts = origin.arts.map(a => instantiateArt(a.id, a.mastery));
++
++  return {
++    schemaVersion: 1,
++    character,
++    world: {
++      turn: 0,
++      locationIds: wuxiaLocationIds(fantasy),
++      knownFacts: [],
++      knownRumorIds: [],
++      knownNpcIds: [],
++    },
++    jianghu: createWuxiaJianghu({ fantasy }),
++    ledger: [],
++  };
++}
++export * from './opening';
+diff --git a/src/world/content/jianghuSeed.ts b/src/world/content/jianghuSeed.ts
+new file mode 100644
+index 0000000..d2d30ec
+--- /dev/null
++++ b/src/world/content/jianghuSeed.ts
+@@ -0,0 +1,243 @@
++import type {
++  FactionRelationState, FactionState, JianghuState, MarketState, NPCState,
++  ObligationState, RelationshipState, RumorState, WorldEventState,
++} from '../../engine/jianghu';
++import { DEFAULT_FANTASY_PRESET, FANTASY_PRESETS, supernaturalEnabled, type FantasyLayerConfig } from './fantasyLayer';
++import { locationsFor } from './locations';
++
++/** Presentation/dialogue data kept beside (never inside) the authoritative NPCState. */
++export interface NpcProfile {
++  npc: NPCState;
++  zh: string;
++  appearance: string;
++  /** Guidance for the NPC-dialogue contract (Game Bible §13): how this person talks. */
++  voice: string;
++  fantasy?: boolean;
++}
++
++const goal = (id: string, kind: NPCState['goals'][number]['kind'], description: string, priority: number, targetId?: string) =>
++  ({ id, kind, description, priority, progress: 0, active: true, ...(targetId ? { targetId } : {}) });
++
++const npc = (partial: Omit<NPCState, 'disposition' | 'memories' | 'alive'> & { disposition?: number }): NPCState =>
++  ({ disposition: 0, memories: [], alive: true, ...partial });
++
++export const FACTIONS: FactionState[] = [
++  { id: 'faction-jade-hall', name: 'Jade Hall', type: 'sect',
++    description: 'An orthodox sword sect that prizes reputation, sworn oaths, and the Azure River Sword. Its aging master has not named an heir.',
++    territory: ['Jade Hall', 'Cloudstep Peak'], resources: 60, influence: 45, goals: ['protect travelers', 'preserve martial traditions', 'settle succession'],
++    allies: ['faction-ninefold'], enemies: ['faction-crimson-lotus'], internalTension: 25, playerReputation: 0 },
++  { id: 'faction-black-river', name: 'Black River Brotherhood', type: 'guild',
++    description: 'Smugglers, informants and river pilots who run Lantern Ferry. They keep their word to those who pay.',
++    territory: ['Lantern Ferry'], resources: 55, influence: 35, goals: ['control river trade', 'collect debts', 'buy off the garrison'],
++    allies: [], enemies: [], internalTension: 20, playerReputation: 0 },
++  { id: 'faction-ninefold', name: 'Ninefold Monastery', type: 'religious',
++    description: 'A neutral monastery of internal-arts masters and healers. Guards a sealed ninth courtyard no outsider has seen.',
++    territory: ['Ninefold Monastery'], resources: 50, influence: 40, goals: ['heal the wounded', 'guard the ninth courtyard', 'remain neutral'],
++    allies: ['faction-jade-hall'], enemies: [], internalTension: 10, playerReputation: 0 },
++  { id: 'faction-crimson-lotus', name: 'Crimson Lotus Society', type: 'sect',
++    description: 'A heterodox sect of poisoners and needle-masters, shunned by the orthodox yet quietly relied upon for rare medicines.',
++    territory: ['Blackwater Marsh'], resources: 40, influence: 25, goals: ['recover the poison codex', 'win recognition', 'survive orthodox hostility'],
++    allies: [], enemies: ['faction-jade-hall'], internalTension: 35, playerReputation: 0 },
++  { id: 'faction-frostbell-garrison', name: 'Frostbell Garrison', type: 'court',
++    description: 'Imperial border troops who tax the pass, hunt deserters, and look the other way when bribed.',
++    territory: ['Frostbell Pass'], resources: 65, influence: 50, goals: ['hold the pass', 'feed the garrison', 'suppress banditry'],
++    allies: [], enemies: [], internalTension: 30, playerReputation: 0 },
++  { id: 'faction-willow-guild', name: 'Willow Merchants\' Guild', type: 'guild',
++    description: 'The market town\'s traders. They hire escorts, fund healers, and sell news as readily as grain.',
++    territory: ['Willow Market Town', 'The Crossroads'], resources: 70, influence: 40, goals: ['keep roads open', 'stabilize prices', 'secure escorts'],
++    allies: [], enemies: [], internalTension: 15, playerReputation: 0 },
++];
++
++export const FACTION_RELATIONS: FactionRelationState[] = [
++  { id: 'frel-jade-black', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', trust: -5, hostility: 30, trade: 25 },
++  { id: 'frel-jade-lotus', factionAId: 'faction-jade-hall', factionBId: 'faction-crimson-lotus', trust: -40, hostility: 60, trade: 0 },
++  { id: 'frel-jade-ninefold', factionAId: 'faction-jade-hall', factionBId: 'faction-ninefold', trust: 50, hostility: 0, trade: 10 },
++  { id: 'frel-black-garrison', factionAId: 'faction-black-river', factionBId: 'faction-frostbell-garrison', trust: -10, hostility: 20, trade: 15 },
++  { id: 'frel-black-willow', factionAId: 'faction-black-river', factionBId: 'faction-willow-guild', trust: 10, hostility: 10, trade: 50 },
++  { id: 'frel-lotus-willow', factionAId: 'faction-crimson-lotus', factionBId: 'faction-willow-guild', trust: 5, hostility: 5, trade: 20 },
++];
++
++export const NPC_PROFILES: NpcProfile[] = [
++  { zh: '老茶伯', appearance: 'Stooped, tea-stained apron, eyes that miss nothing.',
++    voice: 'Gossipy and proverb-fond; deflects danger with a joke and a refill.',
++    npc: npc({ id: 'npc-teahouse-keeper', name: 'Old Tea Keeper', role: 'tea house keeper', locationId: 'The Crossroads', factionId: 'faction-willow-guild',
++      goals: [goal('goal-tea-open', 'rest', 'Keep the tea house open', 80), goal('goal-avoid-trouble', 'protect', 'Avoid sect trouble', 70)],
++      fears: ['bandits', 'war between sects'], secrets: ['Sells the same gossip to Jade Hall and the Black River for protection.'],
++      skills: ['tea', 'local gossip', 'basic first aid'], resources: 20 }) },
++  { zh: '浪劍客', appearance: 'Sun-browned, a plain sword wrapped in oilcloth, an expulsion scar hidden under his collar.',
++    voice: 'Laconic and courteous; speaks of honor as if it were a debt he is still paying.',
++    npc: npc({ id: 'npc-wandering-swordsman', name: 'Wandering Swordsman', role: 'wandering martial artist', locationId: 'The Crossroads',
++      goals: [goal('goal-worthy-opponent', 'train', 'Find a worthy opponent', 70), goal('goal-repay-debt', 'collect_debt', 'Repay an old debt to Captain Ma', 90, 'npc-ma-tie')],
++      fears: ['dishonor', 'betrayal'], secrets: ['Real name Shen Wuyi, once an outer disciple of Jade Hall, expelled for striking a senior.', 'Owes Captain Ma his life.'],
++      skills: ['swordsmanship', 'tracking'], resources: 10 }) },
++  { zh: '雲霜', appearance: 'Calm, ink-stained fingers, a lacquered medicine chest she never lets out of reach.',
++    voice: 'Precise and warm; asks about symptoms before names. Refuses to discuss her past.',
++    npc: npc({ id: 'npc-yun-shuang', name: 'Madam Yun Shuang', role: 'healer', locationId: 'Willow Market Town', factionId: 'faction-willow-guild',
++      goals: [goal('goal-heal-town', 'protect', 'Keep the town\'s fever season in check', 80), goal('goal-secure-herbs', 'trade', 'Secure marsh herbs before shortages', 70)],
++      fears: ['her past being exposed', 'a patient dying under her hands'],
++      secrets: ['Once trained as an antidote-maker for the Crimson Lotus Society.', 'Left after refusing to poison a child.'],
++      skills: ['medicine', 'antidotes', 'herb lore'], resources: 35 }) },
++  { zh: '白青山', appearance: 'White-haired, upright, hands scarred from decades of sword practice.',
++    voice: 'Measured, formal, speaks in rules and precedents; warms only when speaking of the young.',
++    npc: npc({ id: 'npc-bai-qingshan', name: 'Elder Bai Qingshan', role: 'Jade Hall master', locationId: 'Jade Hall', factionId: 'faction-jade-hall',
++      goals: [goal('goal-name-heir', 'social', 'Name an heir before the autumn assembly', 85), goal('goal-recover-volume', 'investigate', 'Recover the missing final volume of the Azure River Sword', 90)],
++      fears: ['the Hall splitting', 'dying with the sword manual incomplete'],
++      secrets: ['The final volume of the Azure River Sword has been missing for a month.', 'He suspects his best disciple.'],
++      skills: ['Azure River Sword', 'inner cultivation', 'leadership'], resources: 55 }) },
++  { zh: '顧文', appearance: 'Handsome, restless, speaks softly and watches everyone.',
++    voice: 'Courteous with an edge; answers questions with questions.',
++    npc: npc({ id: 'npc-gu-wen', name: 'Gu Wen', role: 'Jade Hall senior disciple', locationId: 'Jade Hall', factionId: 'faction-jade-hall',
++      goals: [goal('goal-win-succession', 'social', 'Win the succession before the autumn assembly', 85), goal('goal-study-volume', 'train', 'Master the stolen final volume in secret', 75)],
++      fears: ['being passed over', 'exposure'],
++      secrets: ['Took the final volume of the Azure River Sword to study it.', 'Intends to challenge Elder Bai\'s chosen heir publicly.'],
++      skills: ['Azure River Sword', 'etiquette', 'intrigue'], resources: 25 }) },
++  { zh: '馬鐵', appearance: 'Broad, river-weathered, a ledger tucked in his sash instead of a weapon.',
++    voice: 'Genial and transactional; every kindness is priced, and he never forgets one.',
++    npc: npc({ id: 'npc-ma-tie', name: 'Captain Ma Tie', role: 'ferry captain, Black River Brotherhood', locationId: 'Lantern Ferry', factionId: 'faction-black-river',
++      goals: [goal('goal-raise-toll', 'trade', 'Raise the ferry toll to fund bribes', 80), goal('goal-collect', 'collect_debt', 'Collect what the swordsman owes', 60, 'npc-wandering-swordsman')],
++      fears: ['the garrison cracking down', 'an open war with Jade Hall'],
++      secrets: ['The toll increase funds payments to Marshal Zhao.', 'Quietly protects river orphans.'],
++      skills: ['river piloting', 'smuggling', 'negotiation'], resources: 45 }) },
++  { zh: '慧遠', appearance: 'Slight, serene, a bell-rope callus on each palm.',
++    voice: 'Gentle and indirect; answers with a question or a short story, never a command.',
++    npc: npc({ id: 'npc-abbot-huiyuan', name: 'Abbot Huiyuan', role: 'abbot', locationId: 'Ninefold Monastery', factionId: 'faction-ninefold',
++      goals: [goal('goal-guard-ninth', 'protect', 'Guard the ninth courtyard', 90), goal('goal-heal', 'protect', 'Treat every wounded traveler who arrives', 80)],
++      fears: ['what is sealed in the ninth courtyard', 'the monastery being dragged into war'],
++      secrets: ['The ninth courtyard holds a sealed manuscript older than the monastery.'],
++      skills: ['Nine-Bell Breathing', 'medicine', 'meditation'], resources: 40 }) },
++  { zh: '蓮小月', appearance: 'Slim, marsh-pale, a bandolier of needles under a patched cloak.',
++    voice: 'Dry, guarded, sometimes startlingly honest; hates being pitied.',
++    npc: npc({ id: 'npc-lian-xiaoyue', name: 'Lian Xiaoyue', role: 'needle-master, Crimson Lotus Society', locationId: 'Blackwater Marsh', factionId: 'faction-crimson-lotus',
++      goals: [goal('goal-find-codex', 'investigate', 'Find the poison codex in the Sunken Archive', 85, 'Sunken Archive'), goal('goal-antidote', 'trade', 'Obtain the antidote herbs her sister needs', 80)],
++      fears: ['her sister dying', 'the orthodox sects hunting her'],
++      secrets: ['Her younger sister is dying of a slow poison only the codex can cure.'],
++      skills: ['Crimson Lotus Needle Art', 'poison', 'tracking'], resources: 20 }) },
++  { zh: '趙榮', appearance: 'Heavy-browed, frost-cracked lips, a commander\'s seal on a cord.',
++    voice: 'Curt and procedural; softens only when discussing his soldiers.',
++    npc: npc({ id: 'npc-zhao-rong', name: 'Marshal Zhao Rong', role: 'garrison commander', locationId: 'Frostbell Pass', factionId: 'faction-frostbell-garrison',
++      goals: [goal('goal-hold-pass', 'protect', 'Hold the pass through winter', 85), goal('goal-feed-garrison', 'trade', 'Secure grain for the garrison', 80)],
++      fears: ['mutiny', 'a hungry winter'],
++      secrets: ['Skims grain to keep the garrison fed and sells the rest to the marsh.', 'Takes payments from the Black River.'],
++      skills: ['Frostbell Spear', 'command', 'logistics'], resources: 60 }) },
++  { zh: '阿麟', appearance: 'Quick, barefoot, always carrying something that is not his.',
++    voice: 'Fast, cheeky, sells gossip by the piece and lies when it is cheaper.',
++    npc: npc({ id: 'npc-ah-lin', name: 'Ah Lin', role: 'street informant', locationId: 'Willow Market Town',
++      goals: [goal('goal-sell-news', 'investigate', 'Find news worth selling', 75), goal('goal-eat', 'trade', 'Earn enough for a real meal', 60)],
++      fears: ['guild enforcers', 'winter'], secrets: ['Saw a Jade Hall robe near the scripture pavilion the night the volume went missing.'],
++      skills: ['rumors', 'pickpocketing', 'tailing'], resources: 3 }) },
++  { zh: '蘇眠', fantasy: true, appearance: 'A ferry singer with a river-lamp voice and eyes that catch light like an animal\'s.',
++    voice: 'Playful and oblique; answers in song fragments, never lies outright but never answers straight.',
++    npc: npc({ id: 'npc-su-mian', name: 'Su Mian', role: 'ferry singer', locationId: 'Lantern Ferry',
++      goals: [goal('goal-return-grove', 'travel', 'Return to Moonwell Grove before the autumn moon', 80, 'Moonwell Grove'), goal('goal-listen', 'investigate', 'Listen for who is hunting the grove', 70)],
++      fears: ['iron bells', 'being recognized'],
++      secrets: ['A fox spirit in human form.', 'Her grove\'s well is being sought by a relic-hunter.'],
++      skills: ['singing', 'Foxfire Illusion Steps', 'listening'], resources: 8 }) },
++  { zh: '墨老', fantasy: true, appearance: 'Ink-black robes, papery skin, a lantern he never lights.',
++    voice: 'Archaic, patient, courteous to a fault; speaks of centuries as if they were seasons.',
++    npc: npc({ id: 'npc-archivist-mo', name: 'Old Archivist Mo', role: 'archive keeper', locationId: 'Sunken Archive', factionId: undefined,
++      goals: [goal('goal-keep-stacks', 'protect', 'Keep the remaining scrolls from the wrong readers', 90)],
++      fears: ['the archive being sold off', 'readers who do not return'],
++      secrets: ['Has kept the archive for far longer than a human lifetime.', 'The poison codex is real, and he knows what it costs to read it.'],
++      skills: ['scholarship', 'languages', 'ancient arts'], resources: 15 }) },
++];
++
++export const RELATIONSHIPS: RelationshipState[] = [
++  { id: 'rel-npc-bai-qingshan-npc-gu-wen', subjectId: 'npc-bai-qingshan', targetId: 'npc-gu-wen', trust: 20, respect: 60, fear: 0, affection: 35, debt: 0, grudge: 0 },
++  { id: 'rel-npc-gu-wen-npc-bai-qingshan', subjectId: 'npc-gu-wen', targetId: 'npc-bai-qingshan', trust: 10, respect: 50, fear: 15, affection: 20, debt: 0, grudge: 15 },
++  { id: 'rel-npc-wandering-swordsman-npc-ma-tie', subjectId: 'npc-wandering-swordsman', targetId: 'npc-ma-tie', trust: 30, respect: 40, fear: 0, affection: 10, debt: 70, grudge: 0 },
++  { id: 'rel-npc-ma-tie-npc-wandering-swordsman', subjectId: 'npc-ma-tie', targetId: 'npc-wandering-swordsman', trust: 25, respect: 30, fear: 0, affection: 10, debt: 0, grudge: 0 },
++  { id: 'rel-npc-yun-shuang-npc-abbot-huiyuan', subjectId: 'npc-yun-shuang', targetId: 'npc-abbot-huiyuan', trust: 60, respect: 70, fear: 0, affection: 30, debt: 40, grudge: 0 },
++  { id: 'rel-npc-lian-xiaoyue-npc-yun-shuang', subjectId: 'npc-lian-xiaoyue', targetId: 'npc-yun-shuang', trust: -10, respect: 30, fear: 0, affection: 0, debt: 0, grudge: 25 },
++  { id: 'rel-npc-ma-tie-npc-zhao-rong', subjectId: 'npc-ma-tie', targetId: 'npc-zhao-rong', trust: -5, respect: 15, fear: 20, affection: 0, debt: 0, grudge: 5 },
++];
++
++export const OBLIGATIONS: ObligationState[] = [
++  { id: 'ob-swordsman-ma', debtorId: 'npc-wandering-swordsman', creditorId: 'npc-ma-tie', kind: 'debt', severity: 3,
++    description: 'The swordsman owes Captain Ma his life and has promised to repay it in kind.', fulfilled: false, createdTurn: 0, dueTurn: 40 },
++  { id: 'ob-yun-huiyuan', debtorId: 'npc-yun-shuang', creditorId: 'npc-abbot-huiyuan', kind: 'favor', severity: 2,
++    description: 'The abbot sheltered Yun Shuang when she fled the marsh; she has promised to serve the infirmary when asked.', fulfilled: false, createdTurn: 0 },
++  { id: 'ob-gu-bai-oath', debtorId: 'npc-gu-wen', creditorId: 'npc-bai-qingshan', kind: 'oath', severity: 4,
++    description: 'Gu Wen swore a disciple\'s oath of loyalty to Elder Bai.', fulfilled: false, createdTurn: 0 },
++];
++
++export const RUMORS: Array<Omit<RumorState, 'createdTurn'> & { fantasy?: boolean; truth: 'true' | 'false' | 'distorted' }> = [
++  { id: 'rumor-volume-missing', text: 'The Jade Hall\'s final sword volume has vanished from the scripture pavilion.', origin: 'npc-ah-lin',
++    currentLocationId: 'Willow Market Town', status: 'plausible', credibility: 55, knownBy: ['npc-ah-lin'], spreadRate: 1, truth: 'true' },
++  { id: 'rumor-toll-hike', text: 'The Black River will double the Lantern Ferry toll before the autumn assembly.', origin: 'npc-teahouse-keeper',
++    currentLocationId: 'The Crossroads', status: 'unverified', credibility: 65, knownBy: ['npc-teahouse-keeper'], spreadRate: 1, truth: 'true' },
++  { id: 'rumor-grain-skim', text: 'Marshal Zhao is selling the garrison\'s grain to bandits in the marsh.', origin: 'npc-ah-lin',
++    currentLocationId: 'Willow Market Town', status: 'unverified', credibility: 40, knownBy: ['npc-ah-lin'], spreadRate: 1, truth: 'distorted' },
++  { id: 'rumor-healer-lotus', text: 'The healer of Willow Market was once a Crimson Lotus poisoner.', origin: 'npc-ah-lin',
++    currentLocationId: 'Willow Market Town', status: 'unverified', credibility: 30, knownBy: ['npc-ah-lin'], spreadRate: 1, truth: 'true' },
++  { id: 'rumor-ghost-singer', text: 'A ferry singer at Lantern Ferry never ages and never lies, and fishermen who follow her song are not seen again.', origin: 'npc-ma-tie',
++    currentLocationId: 'Lantern Ferry', status: 'unverified', credibility: 25, knownBy: ['npc-ma-tie'], spreadRate: 1, truth: 'distorted', fantasy: true },
++  { id: 'rumor-archive-codex', text: 'A forbidden poison codex lies in the Sunken Archive, and whoever reads it forgets their own name.', origin: 'npc-lian-xiaoyue',
++    currentLocationId: 'Blackwater Marsh', status: 'unverified', credibility: 45, knownBy: ['npc-lian-xiaoyue'], spreadRate: 1, truth: 'true', fantasy: true },
++];
++
++export const WORLD_EVENTS: WorldEventState[] = [
++  { id: 'event-toll-dispute', kind: 'conflict', title: 'The Ferry Toll Dispute',
++    description: 'Jade Hall couriers and the Black River argue over the Lantern Ferry toll; tempers are rising.',
++    locationId: 'Lantern Ferry', factionIds: ['faction-jade-hall', 'faction-black-river'], severity: 2, active: true, createdTurn: 0 },
++  { id: 'event-fever-season', kind: 'natural', title: 'Fever Season in Willow Market',
++    description: 'A river fever is spreading through the market town; medicine prices are climbing.',
++    locationId: 'Willow Market Town', factionIds: ['faction-willow-guild'], severity: 2, active: true, createdTurn: 0, expiresTurn: 30 },
++  { id: 'event-autumn-assembly', kind: 'political', title: 'The Autumn Assembly Approaches',
++    description: 'Jade Hall must name an heir before the autumn assembly; rival disciples are positioning themselves.',
++    locationId: 'Jade Hall', factionIds: ['faction-jade-hall'], severity: 3, active: true, createdTurn: 0, expiresTurn: 60 },
++];
++
++/** Stock 20 is "no scarcity" in the v3 price model; lower stock raises scarcity and price. */
++export const MARKETS: MarketState[] = [
++  { locationId: 'The Crossroads', goods: { tea: 22, rice: 20, medicine: 12, wine: 16 }, basePrices: { tea: 4, rice: 3, medicine: 12, wine: 6 },
++    priceMultipliers: { tea: 1, rice: 1, medicine: 1, wine: 1 }, scarcity: { tea: 0, rice: 0, medicine: 24, wine: 12 }, lastUpdatedTurn: 0 },
++  { locationId: 'Lantern Ferry', goods: { fish: 24, salt: 14, wine: 20, rope: 18 }, basePrices: { fish: 3, salt: 8, wine: 6, rope: 5 },
++    priceMultipliers: { fish: 1, salt: 1, wine: 1, rope: 1 }, scarcity: { fish: 0, salt: 18, wine: 0, rope: 6 }, lastUpdatedTurn: 0 },
++  { locationId: 'Willow Market Town', goods: { rice: 26, silk: 20, medicine: 8, herbs: 10 }, basePrices: { rice: 3, silk: 25, medicine: 12, herbs: 7 },
++    priceMultipliers: { rice: 1, silk: 1, medicine: 1, herbs: 1 }, scarcity: { rice: 0, silk: 0, medicine: 36, herbs: 30 }, lastUpdatedTurn: 0 },
++  { locationId: 'Frostbell Pass', goods: { grain: 10, iron: 20, furs: 22, wine: 12 }, basePrices: { grain: 5, iron: 14, furs: 10, wine: 8 },
++    priceMultipliers: { grain: 1, iron: 1, furs: 1, wine: 1 }, scarcity: { grain: 30, iron: 0, furs: 0, wine: 24 }, lastUpdatedTurn: 0 },
++];
++
++function cloneAll<T>(items: T[]): T[] { return items.map(item => JSON.parse(JSON.stringify(item))); }
++
++export interface WuxiaJianghuOptions {
++  fantasy?: FantasyLayerConfig;
++}
++
++/**
++ * Build the authored starting Jianghu. Pure and deterministic: no randomness,
++ * and every returned object is an independent copy of the catalog data.
++ * When the fantasy layer is off, supernatural NPCs, rumors, and locations are omitted.
++ */
++export function createWuxiaJianghu(options: WuxiaJianghuOptions = {}): JianghuState {
++  const fantasy = options.fantasy ?? FANTASY_PRESETS[DEFAULT_FANTASY_PRESET];
++  const withFantasy = supernaturalEnabled(fantasy);
++  const locationIds = new Set(locationsFor(withFantasy).map(l => l.id));
++
++  const npcs = cloneAll(NPC_PROFILES.filter(p => withFantasy || !p.fantasy).map(p => p.npc));
++  const npcIds = new Set(npcs.map(n => n.id));
++  const factions = cloneAll(FACTIONS).map(f => ({ ...f, territory: f.territory.filter(t => locationIds.has(t)) }));
++  const rumors = cloneAll(RUMORS.filter(r => withFantasy || !r.fantasy)).map(({ truth: _truth, fantasy: _fantasy, ...rest }) => ({ ...rest, createdTurn: 0 }));
++
++  return {
++    schemaVersion: 1,
++    npcs,
++    factions,
++    relationships: cloneAll(RELATIONSHIPS).filter(r => npcIds.has(r.subjectId) && npcIds.has(r.targetId)),
++    rumors,
++    obligations: cloneAll(OBLIGATIONS).filter(o => npcIds.has(o.debtorId) && npcIds.has(o.creditorId)),
++    worldEvents: cloneAll(WORLD_EVENTS),
++    knowledgeVersion: 1,
++    knowledgeRecords: [],
++    causalChains: [],
++    locationConditions: [],
++    factionRelations: cloneAll(FACTION_RELATIONS),
++    markets: cloneAll(MARKETS).filter(m => locationIds.has(m.locationId)),
++  };
++}
++
++/** Ids the simulation should register as `world.locationIds` for this setting. */
++export function wuxiaLocationIds(fantasy: FantasyLayerConfig = FANTASY_PRESETS[DEFAULT_FANTASY_PRESET]): string[] {
++  return locationsFor(supernaturalEnabled(fantasy)).map(l => l.id);
++}
+diff --git a/src/world/content/locations.ts b/src/world/content/locations.ts
+new file mode 100644
+index 0000000..eb837f2
+--- /dev/null
++++ b/src/world/content/locations.ts
+@@ -0,0 +1,98 @@
++/**
++ * The Nine Rivers Jianghu — location graph.
++ *
++ * Location ids are the English display names, matching the existing
++ * `GameState.location` strings and the default `'The Crossroads'` start.
++ * Distances are travel-days; the graph is undirected.
++ */
++export type Terrain = 'road' | 'river' | 'mountain' | 'town' | 'marsh' | 'pass' | 'forest' | 'ruin';
++
++export interface LocationProfile {
++  id: string;
++  zh: string;
++  region: string;
++  terrain: Terrain;
++  summary: string;
++  /** Inspectable points of interest (candidate targets for `inspect` once the contract supports features). */
++  features: string[];
++  hazards: string[];
++  /** Part of the optional supernatural layer; hidden when the layer is off. */
++  fantasy?: boolean;
++}
++
++export interface TravelEdge { a: string; b: string; days: number }
++
++export const LOCATIONS: LocationProfile[] = [
++  { id: 'The Crossroads', zh: '十字路口', region: 'Central Plain', terrain: 'road',
++    summary: 'Four roads meet beneath an old camphor tree. A tea house, a notice wall, and everyone passing through.',
++    features: ['notice wall', 'camphor tree shrine', 'tea house back room'], hazards: ['pickpockets'] },
++  { id: 'Lantern Ferry', zh: '燈渡', region: 'Nine Rivers', terrain: 'river',
++    summary: 'A lamp-lit river port where smugglers, pilgrims and sect couriers share the same boats. Tolls are negotiable; tempers are not.',
++    features: ['toll house', 'lantern pier', 'sunken barge'], hazards: ['river brawls', 'toll disputes'] },
++  { id: 'Willow Market Town', zh: '柳市', region: 'Nine Rivers', terrain: 'town',
++    summary: 'The Jianghu\'s pantry and pharmacy: grain, silk, medicine, and every rumor worth its price.',
++    features: ['herb stalls', 'guild hall', 'storyteller\'s corner'], hazards: ['swindlers', 'fever season'] },
++  { id: 'Jade Hall', zh: '玉堂', region: 'Azure Hills', terrain: 'mountain',
++    summary: 'An orthodox sword sect behind white walls and cypress. Famous for its rules, quietly strained by its succession.',
++    features: ['training courtyard', 'ancestral tablet hall', 'sealed scripture pavilion'], hazards: ['sect discipline'] },
++  { id: 'Cloudstep Peak', zh: '踏雲峰', region: 'Azure Hills', terrain: 'mountain',
++    summary: 'A knife-edge ridge where qinggong is tested and old masters retreat to die or to ascend.',
++    features: ['chain bridge', 'hermit caves', 'wind-scoured stele'], hazards: ['falls', 'thin air'] },
++  { id: 'Ninefold Monastery', zh: '九重寺', region: 'Silent Vale', terrain: 'mountain',
++    summary: 'Nine courtyards, nine bells, one rule: all who arrive wounded are treated first and questioned later.',
++    features: ['bell tower', 'infirmary court', 'ninth courtyard (closed)'], hazards: ['vows of silence'] },
++  { id: 'Frostbell Pass', zh: '霜鈴關', region: 'Northern March', terrain: 'pass',
++    summary: 'A fortified mountain pass hung with frost-bells that ring when the wind turns. Imperial soldiers, border traders, and deserters.',
++    features: ['garrison gate', 'bell line', 'granary'], hazards: ['blizzards', 'press-gangs'] },
++  { id: 'Blackwater Marsh', zh: '黑水澤', region: 'Nine Rivers', terrain: 'marsh',
++    summary: 'Reed labyrinths and tea-dark water. Rare herbs and rarer poisons grow here; so do outlaws.',
++    features: ['reed maze', 'stilt village', 'poison-herb beds'], hazards: ['miasma', 'bandits', 'getting lost'] },
++  { id: 'Sunken Archive', zh: '沉卷閣', region: 'Silent Vale', terrain: 'ruin',
++    summary: 'A library half-drowned by a vanished lake. Its remaining scrolls are said to rewrite those who read them.',
++    features: ['flooded stacks', 'reading platform', 'iron lock-room'], hazards: ['collapse', 'cursed texts'], fantasy: true },
++  { id: 'Moonwell Grove', zh: '月井林', region: 'Azure Hills', terrain: 'forest',
++    summary: 'A ring of silver birch around a still well that shows the sky at the wrong hour. Locals leave offerings and do not linger.',
++    features: ['moonwell', 'offering stones', 'fox-shrine'], hazards: ['lost time', 'illusions'], fantasy: true },
++];
++
++export const TRAVEL_EDGES: TravelEdge[] = [
++  { a: 'The Crossroads', b: 'Lantern Ferry', days: 1 },
++  { a: 'The Crossroads', b: 'Willow Market Town', days: 1 },
++  { a: 'The Crossroads', b: 'Jade Hall', days: 2 },
++  { a: 'The Crossroads', b: 'Frostbell Pass', days: 3 },
++  { a: 'Lantern Ferry', b: 'Willow Market Town', days: 2 },
++  { a: 'Lantern Ferry', b: 'Blackwater Marsh', days: 2 },
++  { a: 'Willow Market Town', b: 'Ninefold Monastery', days: 2 },
++  { a: 'Jade Hall', b: 'Cloudstep Peak', days: 1 },
++  { a: 'Cloudstep Peak', b: 'Moonwell Grove', days: 2 },
++  { a: 'Ninefold Monastery', b: 'Sunken Archive', days: 3 },
++  { a: 'Ninefold Monastery', b: 'Frostbell Pass', days: 3 },
++  { a: 'Blackwater Marsh', b: 'Sunken Archive', days: 2 },
++];
++
++export function locationsFor(includeFantasy: boolean): LocationProfile[] {
++  return LOCATIONS.filter(location => includeFantasy || !location.fantasy);
++}
++
++/** Shortest travel time (days) between two locations, or undefined when unreachable. */
++export function travelDays(from: string, to: string, includeFantasy = true): number | undefined {
++  const allowed = new Set(locationsFor(includeFantasy).map(l => l.id));
++  if (!allowed.has(from) || !allowed.has(to)) return undefined;
++  const dist = new Map<string, number>([[from, 0]]);
++  const queue = [from];
++  while (queue.length) {
++    queue.sort((x, y) => dist.get(x)! - dist.get(y)!);
++    const current = queue.shift()!;
++    if (current === to) return dist.get(current);
++    for (const edge of TRAVEL_EDGES) {
++      const next = edge.a === current ? edge.b : edge.b === current ? edge.a : undefined;
++      if (!next || !allowed.has(next)) continue;
++      const candidate = dist.get(current)! + edge.days;
++      if (candidate < (dist.get(next) ?? Infinity)) {
++        dist.set(next, candidate);
++        queue.push(next);
++      }
++    }
++  }
++  return undefined;
++}
+diff --git a/src/world/content/martialArts.ts b/src/world/content/martialArts.ts
+new file mode 100644
+index 0000000..d48d970
+--- /dev/null
++++ b/src/world/content/martialArts.ts
+@@ -0,0 +1,188 @@
++import type { MartialArt } from '../../engine/wuxia';
++
++/**
++ * Martial art catalog. `art` is a template at mastery 0 that conforms to the
++ * engine's `MartialArt`; the surrounding profile carries the design data the
++ * Game Bible (§6) requires but the engine type does not yet model.
++ */
++export interface MartialArtProfile {
++  art: MartialArt;
++  zh: string;
++  lineage: string;
++  /** Prerequisites to learn (attribute / art / stage). Not yet enforced by the engine. */
++  requirements: string[];
++  teacherNpcId?: string;
++  strongAgainst: string[];
++  counteredBy: string[];
++  /** The price or risk of practice, for narration and future resolver rules. */
++  risk: string;
++  fantasy?: boolean;
++}
++
++const tech = (id: string, name: string, description: string, qiCost: number) =>
++  ({ id, name, description, qiCost, mastery: 0 });
++
++export const MARTIAL_ARTS: MartialArtProfile[] = [
++  {
++    zh: '碧江劍法', lineage: 'Jade Hall (orthodox)',
++    requirements: ['agility >= 8', 'sword in hand'], teacherNpcId: 'npc-bai-qingshan',
++    strongAgainst: ['saber styles', 'single-weapon fighters'], counteredBy: ['Iron Mountain Palm (crushes the blade\'s tempo)'],
++    risk: 'The final volume demands a calm heart; anger causes Qi deviation.',
++    art: {
++      id: 'art-azure-river-sword', name: 'Azure River Sword', type: 'sword', origin: 'Jade Hall', rank: 3, mastery: 0,
++      techniques: [
++        tech('tech-ripple-parry', 'Ripple Parry', 'A circular deflection that turns a strike into a stumble.', 2),
++        tech('tech-current-thrust', 'Current-Cutting Thrust', 'A long, committed lunge; strong reach, poor recovery.', 5),
++        tech('tech-whirlpool-bind', 'Whirlpool Bind', 'Spins the opponent\'s weapon off-line; needs mastery 40+.', 8),
++      ],
++      compatibleArts: ['art-swallow-skimming-steps', 'art-nine-bell-breathing'],
++      incompatibleArts: ['art-crimson-lotus-needles'],
++      weaknesses: ['heavy blunt weapons', 'cramped corridors'],
++    },
++  },
++  {
++    zh: '九鈴吐納', lineage: 'Ninefold Monastery',
++    requirements: ['willingness to take a vow of restraint', 'no active internal injury'], teacherNpcId: 'npc-abbot-huiyuan',
++    strongAgainst: ['poison', 'Qi disruption', 'exhaustion'], counteredBy: ['sudden overwhelming force before the breath settles'],
++    risk: 'Slow to advance; each bottleneck demands a month of enforced stillness.',
++    art: {
++      id: 'art-nine-bell-breathing', name: 'Nine-Bell Breathing Method', type: 'internal', origin: 'Ninefold Monastery', rank: 4, mastery: 0,
++      techniques: [
++        tech('tech-first-bell', 'First Bell: Settling Breath', 'Recovers Qi faster and steadies the mind.', 0),
++        tech('tech-fourth-bell', 'Fourth Bell: Diamond Resonance', 'Hardens the body against a single blow.', 10),
++        tech('tech-ninth-bell', 'Ninth Bell: Vow of Stillness', 'Total calm; enormous benefit, but the user cannot attack that turn.', 15),
++      ],
++      compatibleArts: ['art-azure-river-sword', 'art-heart-sutra-touch', 'art-iron-mountain-palm'],
++      incompatibleArts: ['art-crimson-lotus-needles', 'art-foxfire-steps'],
++      weaknesses: ['slow to start in a fight'],
++    },
++  },
++  {
++    zh: '鐵山掌', lineage: 'Black River Brotherhood (street) / Frostbell garrison (drill)',
++    requirements: ['strength >= 10', 'constitution >= 9'],
++    strongAgainst: ['unarmored opponents', 'blade-dependent fighters'], counteredBy: ['qinggong kiting', 'poisoned needles'],
++    risk: 'Unconditioned hands split; heavy use without treatment leaves lasting arm injuries.',
++    art: {
++      id: 'art-iron-mountain-palm', name: 'Iron Mountain Palm', type: 'palm', origin: 'Frostbell Pass', rank: 2, mastery: 0,
++      techniques: [
++        tech('tech-mountain-press', 'Mountain Press', 'A slow, immovable push that breaks guard.', 4),
++        tech('tech-rockfall-strike', 'Rockfall Strike', 'Overhead hammer-palm; devastating if it lands.', 7),
++      ],
++      compatibleArts: ['art-nine-bell-breathing'],
++      weaknesses: ['agile opponents', 'ranged attacks'],
++    },
++  },
++  {
++    zh: '掠燕步', lineage: 'Cloudstep Peak hermits',
++    requirements: ['agility >= 10', 'no leg injury above severity 2'], 
++    strongAgainst: ['slow heavy fighters', 'pursuit across rough terrain'], counteredBy: ['hidden weapons', 'enclosed spaces'],
++    risk: 'Overuse drains Qi and exposes the user mid-air.',
++    art: {
++      id: 'art-swallow-skimming-steps', name: 'Swallow-Skimming Steps', type: 'qinqong', origin: 'Cloudstep Peak', rank: 2, mastery: 0,
++      techniques: [
++        tech('tech-wall-run', 'Wall Run', 'Cross walls and rooftops; needs a leg in good condition.', 3),
++        tech('tech-feather-fall', 'Feather Fall', 'Survive a drop that would otherwise injure.', 4),
++      ],
++      compatibleArts: ['art-azure-river-sword', 'art-willow-leaf-saber'],
++      weaknesses: ['broken or damaged legs', 'pinned in narrow spaces'],
++    },
++  },
++  {
++    zh: '赤蓮針', lineage: 'Crimson Lotus Society (heterodox)',
++    requirements: ['perception >= 10', 'steady hands', 'knowledge: poison'], teacherNpcId: 'npc-lian-xiaoyue',
++    strongAgainst: ['armored fighters', 'groups (with prepared needles)'], counteredBy: ['Nine-Bell Breathing (resists the venom)', 'shields'],
++    risk: 'Handling poison without antidote knowledge is a gamble with your own life; orthodox sects shun its users.',
++    art: {
++      id: 'art-crimson-lotus-needles', name: 'Crimson Lotus Needle Art', type: 'hidden_weapon', origin: 'Crimson Lotus Society', rank: 3, mastery: 0,
++      techniques: [
++        tech('tech-petal-volley', 'Petal Volley', 'A fan of needles; hard to dodge, easy to deflect with a wide guard.', 3),
++        tech('tech-lotus-sting', 'Lotus Sting', 'A single needle at a nerve point; paired with poison.', 6),
++      ],
++      incompatibleArts: ['art-azure-river-sword', 'art-nine-bell-breathing'],
++      weaknesses: ['limited needle supply', 'reputation damage with orthodox sects'],
++    },
++  },
++  {
++    zh: '柳葉刀', lineage: 'Willow Market guild guards',
++    requirements: ['agility >= 8'],
++    strongAgainst: ['crowds', 'unarmored opponents'], counteredBy: ['Azure River Sword (superior reach)'],
++    risk: 'Cheap and common; its users rarely earn respect without a signature technique.',
++    art: {
++      id: 'art-willow-leaf-saber', name: 'Willow Leaf Saber', type: 'saber', origin: 'Willow Market Town', rank: 1, mastery: 0,
++      techniques: [
++        tech('tech-willow-slash', 'Willow Slash', 'Fast, flexible cuts that favor numbers and flanking.', 1),
++        tech('tech-wind-bend', 'Bend in the Wind', 'Yield and counter; strong in a crowd.', 3),
++      ],
++      compatibleArts: ['art-swallow-skimming-steps'],
++      weaknesses: ['armor', 'long weapons'],
++    },
++  },
++  {
++    zh: '心經推脈', lineage: 'Ninefold Monastery infirmary',
++    requirements: ['intelligence >= 10', 'steady hands'], teacherNpcId: 'npc-yun-shuang',
++    strongAgainst: ['internal injury', 'meridian damage'], counteredBy: [],
++    risk: 'A failed treatment can worsen the injury; healers carry the weight of every patient.',
++    art: {
++      id: 'art-heart-sutra-touch', name: 'Heart-Sutra Healing Touch', type: 'medicine', origin: 'Ninefold Monastery', rank: 3, mastery: 0,
++      techniques: [
++        tech('tech-pulse-reading', 'Pulse Reading', 'Reveals hidden injuries and poison.', 1),
++        tech('tech-meridian-push', 'Meridian Push', 'Clears blocked Qi; heals internal injury over time.', 8),
++      ],
++      compatibleArts: ['art-nine-bell-breathing'],
++      weaknesses: ['useless in direct combat'],
++    },
++  },
++  {
++    zh: '霜鈴槍', lineage: 'Frostbell Garrison',
++    requirements: ['strength >= 9', 'constitution >= 9'],
++    strongAgainst: ['cavalry', 'charges', 'melee with shorter weapons'], counteredBy: ['close-in fighters who slip past the point'],
++    risk: 'Regimented; its drills mark the user as imperial-trained.',
++    art: {
++      id: 'art-frostbell-spear', name: 'Frostbell Spear', type: 'spear', origin: 'Frostbell Pass', rank: 3, mastery: 0,
++      techniques: [
++        tech('tech-ringing-line', 'Ringing Line', 'A defensive sweep; keeps enemies at point range.', 2),
++        tech('tech-icefall-thrust', 'Icefall Thrust', 'A long straight thrust that punishes a charge.', 6),
++      ],
++      compatibleArts: ['art-iron-mountain-palm'],
++      weaknesses: ['indoor fights', 'close-range grappling'],
++    },
++  },
++  {
++    zh: '狐火幻步', lineage: 'Moonwell Grove (spirit tradition — not Qi cultivation)',
++    requirements: ['supernatural layer enabled', 'a spirit patron or sacred site'], fantasy: true,
++    strongAgainst: ['pursuers', 'crowds', 'those relying on sight'], counteredBy: ['iron talismans', 'Nine-Bell Breathing (steadies the mind)'],
++    risk: 'Every use costs time: hours vanish, and the user may not remember them.',
++    art: {
++      id: 'art-foxfire-steps', name: 'Foxfire Illusion Steps', type: 'other', origin: 'Moonwell Grove', rank: 4, mastery: 0,
++      techniques: [
++        tech('tech-false-trail', 'False Trail', 'Leaves afterimages; pursuers lose track.', 4),
++        tech('tech-lantern-veil', 'Lantern Veil', 'Clouds perception in a small area; costs lost time.', 9),
++      ],
++      incompatibleArts: ['art-nine-bell-breathing'],
++      weaknesses: ['iron', 'bell sounds', 'steady-minded opponents'],
++    },
++  },
++];
++
++export const ARTS_BY_ID: Record<string, MartialArtProfile> = Object.fromEntries(
++  MARTIAL_ARTS.map(profile => [profile.art.id, profile]),
++);
++
++export function artsFor(includeFantasy: boolean): MartialArtProfile[] {
++  return MARTIAL_ARTS.filter(profile => includeFantasy || !profile.fantasy);
++}
++
++/** A fresh, independent copy of a catalog art at the given mastery (0..100). */
++export function instantiateArt(id: string, mastery = 0): MartialArt {
++  const profile = ARTS_BY_ID[id];
++  if (!profile) throw new Error(`Unknown martial art: ${id}`);
++  const clamped = Math.max(0, Math.min(100, mastery));
++  return {
++    ...profile.art,
++    mastery: clamped,
++    techniques: profile.art.techniques.map(t => ({ ...t, mastery: Math.floor(clamped / 2) })),
++    compatibleArts: profile.art.compatibleArts ? [...profile.art.compatibleArts] : undefined,
++    incompatibleArts: profile.art.incompatibleArts ? [...profile.art.incompatibleArts] : undefined,
++    weaknesses: profile.art.weaknesses ? [...profile.art.weaknesses] : undefined,
++  };
++}
+diff --git a/src/world/content/opening.ts b/src/world/content/opening.ts
+new file mode 100644
+index 0000000..eec35cd
+--- /dev/null
++++ b/src/world/content/opening.ts
+@@ -0,0 +1,81 @@
++import type { Character, GameChoice, InventoryItem } from '../../types/game';
++import { LOCATIONS } from './locations';
++import { ORIGINS, type OriginProfile } from './origins';
++
++export interface OriginOpening {
++  narrative: string;
++  choices: GameChoice[];
++  location: string;
++}
++
++export function findOrigin(originId: string): OriginProfile | undefined {
++  return ORIGINS.find(o => o.id === originId);
++}
++
++/** Authored scene-setting used as the demo/fallback opening and as the LLM's fixed scenario. */
++export function buildOriginScenario(origin: OriginProfile): string {
++  const place = LOCATIONS.find(l => l.id === origin.startLocationId);
++  return [
++    `Origin: ${origin.title}. ${origin.summary}`,
++    place ? `Location: ${place.id}. ${place.summary}` : `Location: ${origin.startLocationId}.`,
++    `Tension: ${origin.hook}`,
++  ].join('\n');
++}
++
++/** The first scene and its five contextual choices, entirely from authored content. */
++export function buildOriginOpening(origin: OriginProfile): OriginOpening {
++  const place = LOCATIONS.find(l => l.id === origin.startLocationId);
++  return {
++    narrative: [
++      `${origin.summary}`,
++      place ? `You stand in ${place.id}. ${place.summary}` : '',
++      origin.hook,
++    ].filter(Boolean).join('\n\n'),
++    choices: origin.openingChoices.map((c, i) => ({ id: i + 1, text: c.intent, risk: c.risk })),
++    location: origin.startLocationId,
++  };
++}
++
++/**
++ * Legacy `Character` for the existing UI/save model. Legacy stats are on a
++ * ~1-10 scale (engine attributes are ~10-centred), so they are halved. The
++ * authoritative character lives in the SimulationState.
++ */
++export function createOriginCharacter(
++  origin: OriginProfile,
++  name: string,
++  id: string,
++  fantasyPreset: string,
++): Character {
++  const half = (v: number | undefined) => Math.max(1, Math.round((v ?? 10) / 2));
++  const strength = half(origin.attributes.strength);
++  const intelligence = half(origin.attributes.intelligence);
++  const inventory: InventoryItem[] = origin.inventory.map((item, i) => ({
++    id: `${id}-item-${i}`, name: item, type: 'misc', description: item, quantity: 1, value: 5,
++  }));
++  return {
++    id,
++    name: name.trim() || 'Wanderer',
++    class: origin.title,
++    race: 'Human',
++    level: 1,
++    experience: 0,
++    stats: {
++      strength,
++      agility: half(origin.attributes.agility),
++      intelligence,
++      charisma: half(origin.attributes.charisma),
++      luck: half(origin.attributes.luck),
++      maxHp: 20 + strength * 2,
++      currentHp: 20 + strength * 2,
++      maxMana: 10 + intelligence * 2,
++      currentMana: 10 + intelligence * 2,
++    },
++    skills: origin.arts.map(a => a.id),
++    inventory,
++    gold: 10,
++    background: `${origin.summary} ${origin.hook}`,
++    originId: origin.id,
++    fantasyPreset,
++  };
++}
+diff --git a/src/world/content/origins.ts b/src/world/content/origins.ts
+new file mode 100644
+index 0000000..b801539
+--- /dev/null
++++ b/src/world/content/origins.ts
+@@ -0,0 +1,128 @@
++import type { RiskLevel } from '../../engine/types';
++
++export interface OpeningChoice {
++  /** Short button label. */
++  label: string;
++  /** Free-text intent the player would otherwise type; goes through the intent interpreter. */
++  intent: string;
++  risk: RiskLevel;
++}
++
++export interface OriginProfile {
++  id: string;
++  title: string;
++  zh: string;
++  summary: string;
++  startLocationId: string;
++  attributes: Partial<Record<'strength' | 'agility' | 'constitution' | 'perception' | 'intelligence' | 'charisma' | 'luck', number>>;
++  arts: Array<{ id: string; mastery: number }>;
++  inventory: string[];
++  /** The authored tension this origin walks into; the simulation, not the author, decides what follows. */
++  hook: string;
++  /** Five contextual suggestions (Game Bible §12) for the first scene. */
++  openingChoices: OpeningChoice[];
++  fantasy?: boolean;
++}
++
++export const ORIGINS: OriginProfile[] = [
++  {
++    id: 'origin-wandering-physician', title: 'Wandering Physician', zh: '遊醫',
++    summary: 'You carry a medicine chest and a reputation for not asking whose side a patient is on.',
++    startLocationId: 'Willow Market Town',
++    attributes: { intelligence: 14, perception: 12, strength: 8 },
++    arts: [{ id: 'art-heart-sutra-touch', mastery: 25 }],
++    inventory: ['medicine chest', 'silver needles'],
++    hook: 'Fever season is draining the town\'s medicine just as marsh herbs become dangerous to fetch.',
++    openingChoices: [
++      { label: 'Offer your services', intent: 'Ask Madam Yun Shuang if the infirmary needs another healer', risk: 'low' },
++      { label: 'Check the herb stalls', intent: 'Inspect the herb stalls to see what is scarce', risk: 'low' },
++      { label: 'Listen to the gossip', intent: 'Talk to Ah Lin to learn what the market is whispering', risk: 'medium' },
++      { label: 'Plan a marsh trip', intent: 'Travel to Blackwater Marsh to gather rare herbs', risk: 'high' },
++      { label: 'Treat quietly', intent: 'Rest and tend to patients carefully in the market square', risk: 'low' },
++    ],
++  },
++  {
++    id: 'origin-disgraced-disciple', title: 'Disgraced Disciple', zh: '逐門弟子',
++    summary: 'Jade Hall taught you the Azure River Sword, then cast you out. You still know where the Hall keeps its secrets.',
++    startLocationId: 'The Crossroads',
++    attributes: { agility: 13, charisma: 8, strength: 11 },
++    arts: [{ id: 'art-azure-river-sword', mastery: 22 }],
++    inventory: ['plain sword', 'expulsion token'],
++    hook: 'The Hall\'s final sword volume is missing, and a disciple with your history is the obvious suspect.',
++    openingChoices: [
++      { label: 'Ask the tea keeper', intent: 'Talk to the Old Tea Keeper to hear what the Hall is saying about me', risk: 'low' },
++      { label: 'Approach the swordsman', intent: 'Talk to the Wandering Swordsman about the missing volume', risk: 'medium' },
++      { label: 'Go to Jade Hall', intent: 'Travel to Jade Hall to confront Elder Bai and clear my name', risk: 'high' },
++      { label: 'Read the notice wall', intent: 'Inspect the notice wall for news of the Hall', risk: 'low' },
++      { label: 'Lie low', intent: 'Rest quietly at the tea house and watch who passes', risk: 'low' },
++    ],
++  },
++  {
++    id: 'origin-escort-apprentice', title: 'Escort Apprentice', zh: '鏢局學徒',
++    summary: 'You guard guild caravans with a saber you can barely afford to lose.',
++    startLocationId: 'Lantern Ferry',
++    attributes: { constitution: 12, strength: 11 },
++    arts: [{ id: 'art-willow-leaf-saber', mastery: 28 }],
++    inventory: ['saber', 'guild escort token'],
++    hook: 'The toll dispute has stranded your caravan at the ferry, and both sides want an escort on their side.',
++    openingChoices: [
++      { label: 'Negotiate the toll', intent: 'Talk to Captain Ma Tie about the toll', risk: 'medium' },
++      { label: 'Look for a bypass', intent: 'Inspect the lantern pier for another crossing', risk: 'low' },
++      { label: 'Sell your services', intent: 'Talk to the Jade Hall couriers about escort work', risk: 'medium' },
++      { label: 'Stand firm', intent: 'Attack no one but openly guard the caravan at the toll house', risk: 'medium' },
++      { label: 'Rest and wait', intent: 'Rest with the caravan until tempers cool', risk: 'low' },
++    ],
++  },
++  {
++    id: 'origin-ferry-orphan', title: 'Ferry Orphan', zh: '渡口孤兒',
++    summary: 'Raised on the river by people who owed nobody and told you nothing about your parents.',
++    startLocationId: 'Lantern Ferry',
++    attributes: { agility: 13, luck: 14, charisma: 11 },
++    arts: [{ id: 'art-swallow-skimming-steps', mastery: 15 }],
++    inventory: ['river knife', 'a child\'s jade charm'],
++    hook: 'The charm you were found with is the same pattern an old sect crest once used.',
++    openingChoices: [
++      { label: 'Ask Captain Ma', intent: 'Talk to Captain Ma Tie about where the charm might be from', risk: 'medium' },
++      { label: 'Listen to the singer', intent: 'Talk to Su Mian, the ferry singer, about old songs', risk: 'low' },
++      { label: 'Study the charm', intent: 'Inspect the charm closely for markings', risk: 'low' },
++      { label: 'Visit Willow Market', intent: 'Travel to Willow Market Town to find someone who knows crests', risk: 'medium' },
++      { label: 'Keep it hidden', intent: 'Sneak away from the pier before anyone sees the charm', risk: 'medium' },
++    ],
++  },
++  {
++    id: 'origin-frontier-deserter', title: 'Frontier Deserter', zh: '逃兵',
++    summary: 'You ran from the Frostbell garrison with a spear and a secret about the winter grain.',
++    startLocationId: 'Frostbell Pass',
++    attributes: { strength: 13, constitution: 13, luck: 6 },
++    arts: [{ id: 'art-frostbell-spear', mastery: 30 }],
++    inventory: ['spear', 'torn garrison cloak'],
++    hook: 'Marshal Zhao knows you saw the granary books, and he cannot let you cross the pass.',
++    openingChoices: [
++      { label: 'Slip out at dusk', intent: 'Sneak past the garrison gate at dusk', risk: 'high' },
++      { label: 'Bargain with Zhao', intent: 'Talk to Marshal Zhao Rong and offer silence for passage', risk: 'high' },
++      { label: 'Hide among traders', intent: 'Sneak among the border traders heading south', risk: 'medium' },
++      { label: 'Check the granary', intent: 'Inspect the granary for proof of the skimming', risk: 'medium' },
++      { label: 'Head to the Crossroads', intent: 'Travel to The Crossroads before the garrison notices', risk: 'medium' },
++    ],
++  },
++  {
++    id: 'origin-relic-bearer', title: 'Bearer of the Silver Scroll', zh: '持卷人',
++    summary: 'A scroll that is blank in sunlight and legible by moonlight chose you, or you stole it. You are no longer sure which.',
++    startLocationId: 'The Crossroads', fantasy: true,
++    attributes: { perception: 13, intelligence: 12, luck: 12 },
++    arts: [{ id: 'art-foxfire-steps', mastery: 10 }],
++    inventory: ['silver-edged scroll'],
++    hook: 'Something is following the scroll, and a ferry singer seems to know your name.',
++    openingChoices: [
++      { label: 'Read it by moonlight', intent: 'Inspect the scroll carefully once night falls', risk: 'high' },
++      { label: 'Find the singer', intent: 'Travel to Lantern Ferry to find Su Mian', risk: 'medium' },
++      { label: 'Ask the tea keeper', intent: 'Talk to the Old Tea Keeper about strange scrolls', risk: 'low' },
++      { label: 'Seek the monastery', intent: 'Travel to Ninefold Monastery to find someone who can read it', risk: 'medium' },
++      { label: 'Meditate on it', intent: 'Meditate quietly to steady my mind and sense the scroll', risk: 'medium' },
++    ],
++  },
++];
++
++export function originsFor(includeFantasy: boolean): OriginProfile[] {
++  return ORIGINS.filter(o => includeFantasy || !o.fantasy);
++}
+diff --git a/test/simulation/wuxia-content.test.ts b/test/simulation/wuxia-content.test.ts
+new file mode 100644
+index 0000000..9827bc9
+--- /dev/null
++++ b/test/simulation/wuxia-content.test.ts
+@@ -0,0 +1,160 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
++import { resolveAction } from '../../src/engine/resolveAction';
++import { validateState } from '../../src/engine/validateState';
++import {
++  ARTS_BY_ID, FACTIONS, FANTASY_PRESETS, LOCATIONS, MARTIAL_ARTS, NPC_PROFILES, ORIGINS, RUMORS, TRAVEL_EDGES,
++  createWuxiaJianghu, createWuxiaSimulation, instantiateArt, originsFor, travelDays,
++} from '../../src/world/content';
++
++const locationIds = new Set(LOCATIONS.map(l => l.id));
++const npcIds = new Set(NPC_PROFILES.map(p => p.npc.id));
++const factionIds = new Set(FACTIONS.map(f => f.id));
++
++test('every cross-reference in the authored content resolves', () => {
++  for (const edge of TRAVEL_EDGES) {
++    assert.ok(locationIds.has(edge.a) && locationIds.has(edge.b), `edge ${edge.a}-${edge.b}`);
++    assert.ok(edge.days > 0);
++  }
++  for (const { npc } of NPC_PROFILES) {
++    assert.ok(locationIds.has(npc.locationId), `${npc.id} location`);
++    if (npc.factionId) assert.ok(factionIds.has(npc.factionId), `${npc.id} faction`);
++    for (const g of npc.goals) if (g.targetId) assert.ok(locationIds.has(g.targetId) || npcIds.has(g.targetId), `${g.id} target`);
++  }
++  for (const f of FACTIONS) {
++    f.territory.forEach(t => assert.ok(locationIds.has(t), `${f.id} territory ${t}`));
++    [...f.allies, ...f.enemies].forEach(id => assert.ok(factionIds.has(id), `${f.id} ref ${id}`));
++  }
++  for (const r of RUMORS) {
++    assert.ok(locationIds.has(r.currentLocationId));
++    r.knownBy.forEach(id => assert.ok(npcIds.has(id), `${r.id} knownBy ${id}`));
++  }
++  for (const { art } of MARTIAL_ARTS) {
++    [...(art.compatibleArts ?? []), ...(art.incompatibleArts ?? [])].forEach(id => assert.ok(ARTS_BY_ID[id], `${art.id} ref ${id}`));
++    assert.ok(art.rank >= 1 && art.rank <= 9);
++  }
++  for (const o of ORIGINS) {
++    assert.ok(locationIds.has(o.startLocationId));
++    o.arts.forEach(a => assert.ok(ARTS_BY_ID[a.id], `${o.id} art ${a.id}`));
++    assert.equal(o.openingChoices.length, 5, `${o.id} must offer exactly five suggestions`);
++  }
++});
++
++test('the travel graph is fully connected and symmetric', () => {
++  for (const a of LOCATIONS) for (const b of LOCATIONS) {
++    const d = travelDays(a.id, b.id);
++    assert.ok(d !== undefined, `${a.id} -> ${b.id} unreachable`);
++    assert.equal(d, travelDays(b.id, a.id));
++  }
++});
++
++test('martial art compatibility is mutually consistent', () => {
++  for (const { art } of MARTIAL_ARTS) {
++    for (const other of art.incompatibleArts ?? []) {
++      const back = ARTS_BY_ID[other].art;
++      assert.ok(back.incompatibleArts?.includes(art.id), `${art.id} <-> ${other} not mutual`);
++    }
++  }
++});
++
++test('createWuxiaJianghu is deterministic and returns independent copies', () => {
++  const a = createWuxiaJianghu();
++  const b = createWuxiaJianghu();
++  assert.deepStrictEqual(a, b);
++  a.npcs[0].name = 'MUTATED';
++  a.factions[0].territory.push('nowhere');
++  assert.notEqual(createWuxiaJianghu().npcs[0].name, 'MUTATED');
++  assert.ok(!createWuxiaJianghu().factions[0].territory.includes('nowhere'));
++});
++
++test('the pure-wuxia preset removes every supernatural element', () => {
++  const pure = FANTASY_PRESETS.pure_wuxia;
++  const jianghu = createWuxiaJianghu({ fantasy: pure });
++  const fantasyNpcs = NPC_PROFILES.filter(p => p.fantasy).map(p => p.npc.id);
++  assert.ok(fantasyNpcs.length > 0);
++  for (const id of fantasyNpcs) assert.ok(!jianghu.npcs.some(n => n.id === id));
++  assert.ok(!jianghu.rumors.some(r => r.id === 'rumor-ghost-singer'));
++  const sim = createWuxiaSimulation('origin-wandering-physician', pure);
++  assert.ok(!sim.world.locationIds.includes('Moonwell Grove'));
++  assert.throws(() => createWuxiaSimulation('origin-relic-bearer', pure), /supernatural layer/);
++  assert.ok(originsFor(false).every(o => !o.fantasy));
++});
++
++test('instantiateArt returns independent, bounded copies', () => {
++  const art = instantiateArt('art-azure-river-sword', 250);
++  assert.equal(art.mastery, 100);
++  art.techniques[0].name = 'MUTATED';
++  assert.notEqual(ARTS_BY_ID['art-azure-river-sword'].art.techniques[0].name, 'MUTATED');
++  assert.throws(() => instantiateArt('art-nope'), /Unknown martial art/);
++});
++
++test('every origin yields a valid state, and every opening choice resolves without invalidating it', () => {
++  for (const origin of ORIGINS) {
++    const start = createWuxiaSimulation(origin.id);
++    assert.deepStrictEqual(validateState(start), [], `${origin.id} start state`);
++    for (const choice of origin.openingChoices) {
++      for (const roll of [0, 50, 99]) {
++        const snapshot = JSON.stringify(start);
++        const action = interpretPlayerAction(choice.intent, start, choice.risk);
++        const result = resolveAction(start, action, roll);
++        assert.equal(JSON.stringify(start), snapshot, `${origin.id}/${choice.label} mutated its input`);
++        assert.deepStrictEqual(validateState(result.state), [], `${origin.id}/${choice.label}@${roll}`);
++      }
++    }
++  }
++});
++
++test('a 25-turn scripted campaign stays valid and is reproducible', () => {
++  const play = () => {
++    let state = createWuxiaSimulation('origin-disgraced-disciple');
++    const script = ['Talk to the Old Tea Keeper', 'Rest at the tea house', 'Travel to Lantern Ferry', 'Talk to Captain Ma Tie',
++      'Meditate quietly', 'Inspect the toll house', 'Travel to The Crossroads', 'Talk to the Wandering Swordsman', 'Rest'];
++    for (let turn = 0; turn < 25; turn++) {
++      const action = interpretPlayerAction(script[turn % script.length], state, 'medium');
++      state = resolveAction(state, action, (turn * 37) % 100).state;
++      assert.deepStrictEqual(validateState(state), [], `turn ${turn}`);
++    }
++    return state;
++  };
++  assert.deepStrictEqual(play(), play());
++});
++
++test('every origin opening is authored, self-consistent and playable from the legacy character', async () => {
++  const { buildOriginOpening, buildOriginScenario, createOriginCharacter, findOrigin } = await import('../../src/world/content');
++  for (const origin of ORIGINS) {
++    const opening = buildOriginOpening(origin);
++    assert.equal(opening.location, origin.startLocationId);
++    assert.equal(opening.choices.length, 5);
++    assert.deepStrictEqual(opening.choices.map(c => c.id), [1, 2, 3, 4, 5]);
++    assert.ok(opening.narrative.includes(origin.hook));
++    assert.ok(buildOriginScenario(origin).includes(origin.startLocationId));
++
++    const character = createOriginCharacter(origin, '  ', 'char-1', 'living_legends');
++    assert.equal(character.name, 'Wanderer');
++    assert.equal(character.originId, origin.id);
++    assert.equal(findOrigin(character.originId!)?.id, origin.id);
++    assert.ok(character.stats.maxHp > 0 && character.stats.currentHp === character.stats.maxHp);
++    assert.equal(character.inventory.length, origin.inventory.length);
++    assert.ok(Object.values(character.stats).every(v => Number.isFinite(v) && v >= 1));
++
++    // The simulation built for this origin starts where the opening says it does.
++    const sim = createWuxiaSimulation(origin.id, FANTASY_PRESETS.living_legends, character.name);
++    assert.equal(sim.character.locationId, opening.location);
++    assert.ok(sim.world.locationIds.includes(opening.location));
++    assert.equal(sim.character.name, 'Wanderer');
++  }
++});
++
++test('travel is possible from every origin start (the live world is no longer one room)', () => {
++  for (const origin of ORIGINS) {
++    const start = createWuxiaSimulation(origin.id);
++    const neighbour = TRAVEL_EDGES.find(e => e.a === origin.startLocationId || e.b === origin.startLocationId)!;
++    const destination = neighbour.a === origin.startLocationId ? neighbour.b : neighbour.a;
++    const action = interpretPlayerAction(`Travel to ${destination}`, start, 'medium');
++    assert.equal(action.kind, 'travel');
++    const result = resolveAction(start, action, 95);
++    assert.deepStrictEqual(validateState(result.state), []);
++    assert.equal(result.state.character.locationId, destination, `${origin.id}: should reach ${destination}`);
++  }
++});
+diff --git a/test/support/expect.ts b/test/support/expect.ts
+new file mode 100644
+index 0000000..c792b65
+--- /dev/null
++++ b/test/support/expect.ts
+@@ -0,0 +1,29 @@
++import assert from 'node:assert/strict';
++
++/**
++ * Minimal Jest-style `expect` over node:assert so the Jianghu causality suites
++ * run under the repo's existing `node:test` runner without a new dependency.
++ * Only the matchers those suites use are implemented.
++ */
++function matchers(actual: any, negate: boolean) {
++  const includes = (expected: unknown) =>
++    typeof actual === 'string'
++      ? actual.includes(String(expected))
++      : Array.isArray(actual) && actual.includes(expected);
++  return {
++    toBe: (expected: unknown) => assert.strictEqual(actual, expected),
++    toBeDefined: () => assert.notStrictEqual(actual, undefined),
++    toHaveLength: (length: number) => assert.strictEqual(actual?.length, length),
++    toBeGreaterThan: (n: number) => assert.ok(actual > n, `expected ${actual} > ${n}`),
++    toBeLessThan: (n: number) => assert.ok(actual < n, `expected ${actual} < ${n}`),
++    toBeLessThanOrEqual: (n: number) => assert.ok(actual <= n, `expected ${actual} <= ${n}`),
++    toContain: (expected: unknown) =>
++      negate
++        ? assert.ok(!includes(expected), `expected ${JSON.stringify(actual)} not to contain ${String(expected)}`)
++        : assert.ok(includes(expected), `expected ${JSON.stringify(actual)} to contain ${String(expected)}`),
++  };
++}
++
++export function expect(actual: unknown) {
++  return { ...matchers(actual, false), not: matchers(actual, true) };
++}

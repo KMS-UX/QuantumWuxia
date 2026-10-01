@@ -1,3 +1,5 @@
+import test from 'node:test';
+import { expect } from '../../test/support/expect';
 import { advanceCausalityV5 } from './jianghuCausalityV5';
 import { createDefaultJianghu } from './jianghu';
 import type { SimulationState } from './types';

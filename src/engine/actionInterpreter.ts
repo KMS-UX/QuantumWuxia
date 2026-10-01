@@ -40,9 +40,21 @@ function inferTechnique(text: string): string | undefined {
   return match?.[1]?.trim();
 }
 
-function inferGoal(text: string): string | undefined {
-  const match = text.match(/(?:to|so that|in order to)\s+(.+)$/i);
-  return match?.[1]?.trim();
+function inferGoal(text: string, simulation: SimulationState): string | undefined {
+  // "to" also introduces destinations ("travel to mountain"), so skip matches
+  // whose remainder starts with a known location or NPC name.
+  const knownNames = [
+    ...simulation.world.locationIds,
+    ...(simulation.jianghu?.npcs.map(npc => npc.name) ?? []),
+  ].map(name => name.toLowerCase());
+  // Markers only (no greedy tail) so overlapping "to ... to ..." occurrences are all visited.
+  for (const marker of text.matchAll(/(?:in order to|so that|\bto)\s+/gi)) {
+    const rest = text.slice((marker.index ?? 0) + marker[0].length).trim();
+    if (!rest) continue;
+    if (knownNames.some(name => rest.toLowerCase().startsWith(name))) continue;
+    return rest;
+  }
+  return undefined;
 }
 
 function inferConditionalClauses(text: string): string[] | undefined {
@@ -76,7 +88,7 @@ export function interpretPlayerAction(
     : undefined;
   const approach = inferApproach(lower);
   const techniqueId = kind === 'attack' || kind === 'meditate' ? inferTechnique(lower) : undefined;
-  const intendedGoal = inferGoal(normalized);
+  const intendedGoal = inferGoal(normalized, simulation);
   const conditionalClauses = inferConditionalClauses(lower);
   const declaredConstraints = inferDeclaredConstraints(lower);
 

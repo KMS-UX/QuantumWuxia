@@ -305,7 +305,8 @@ export async function generateNarrative(
 export async function generateCharacterIntro(
   config: LLMConfig,
   character: Character,
-  worldTheme: string
+  worldTheme: string,
+  scenario?: string
 ): Promise<LLMResponse> {
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
@@ -317,7 +318,7 @@ Character: ${character.name}, a level 1 ${character.race} ${character.class}.
 Background: ${character.background}
 Stats: STR ${character.stats.strength}, AGI ${character.stats.agility}, INT ${character.stats.intelligence}, CHA ${character.stats.charisma}, LCK ${character.stats.luck}
 Starting equipment: ${character.inventory.map(i => i.name).join(', ') || 'Nothing'}
-
+${scenario ? `\nAuthored starting scenario (do not contradict it, do not change the location, do not invent new named factions or people; the player's five choices are supplied separately, so "choices" may be an empty array):\n${scenario}\n` : ''}
 Create an engaging opening scene that introduces the character to the world. Set the mood, describe the surroundings, and present an initial situation that the character must respond to. Respond in valid JSON format.` 
     },
   ];

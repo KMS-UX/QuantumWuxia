@@ -68,7 +68,7 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
     }
   }
 
-  for (const [key, value] of Object.entries(c.attributes))
+  for (const [key, value] of Object.entries(c.attributes)) {
     if (!Number.isFinite(value) || value < 0) {
       issues.push({ path: `character.attributes.${key}`, message: 'Attribute must be a finite non-negative number.' });
     }

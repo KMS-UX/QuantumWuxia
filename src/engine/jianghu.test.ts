@@ -1,3 +1,5 @@
+import test from 'node:test';
+import { expect } from '../../test/support/expect';
 import { applyJianghuAction, createDefaultJianghu, createRumor, tickJianghu } from './jianghu';
 import { createDefaultWuxiaCharacter } from './wuxia';
 import type { ProposedAction, SimulationState } from './types';
