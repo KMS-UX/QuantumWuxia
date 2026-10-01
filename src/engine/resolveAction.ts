@@ -97,7 +97,7 @@ export function resolveAction(
       return {
         status: 'blocked',
         summary: 'The destination is unknown or unreachable from the current world map.',
-        action,
+        action: normalizedAction,
         state,
         events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
         roll,
@@ -109,7 +109,7 @@ export function resolveAction(
     return {
       status: 'blocked',
       summary: 'There is not enough Qi to attempt this action safely.',
-      action,
+      action: normalizedAction,
       state,
       events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
       roll,
@@ -225,10 +225,10 @@ export function resolveAction(
   });
 
   const summaries: Record<ActionResolution['status'], string> = {
-    success: 'The normalizedAction succeeds; the narrator may now describe the confirmed result.',
-    partial: 'The normalizedAction partly succeeds or succeeds with a complication.',
+    success: 'The action succeeds; the narrator may now describe the confirmed result.',
+    partial: 'The action partly succeeds or succeeds with a complication.',
     failure: 'The attempt fails; the world state remains consistent and may produce consequences.',
-    blocked: 'The normalizedAction cannot be attempted in the current state.',
+    blocked: 'The action cannot be attempted in the current state.',
   };
 
   const finalIssues = validateState(state);
