@@ -87,10 +87,32 @@ export function resolveAction(
       knownNpcIds: [...(input.world.knownNpcIds ?? [])],
     },
     jianghu: input.jianghu ? JSON.parse(JSON.stringify(input.jianghu)) : createDefaultJianghu(input.character.locationId),
+    ledger: input.ledger.map(entry => ({
+      ...entry,
+      targetIds: [...entry.targetIds],
+      causes: [...entry.causes],
+      effects: [...entry.effects],
+      witnesses: [...entry.witnesses],
+      knowledgeConsequences: [...entry.knowledgeConsequences],
+      causalLinks: [...entry.causalLinks],
+      payload: { ...entry.payload },
+    })),
   };
   const events: StateEvent[] = [];
   const ledgerFor = (status: ActionResolution['status'], resolutionEvents: StateEvent[] = events) =>
-    createEventLedger(state, normalizedAction, resolutionEvents, { status, roll, difficulty: DIFFICULTY[normalizedAction.kind] });
+    createEventLedger(state, normalizedAction, resolutionEvents, {
+      status,
+      roll,
+      difficulty: DIFFICULTY[normalizedAction.kind],
+    });
+  const persistLedger = (
+    status: ActionResolution['status'],
+    resolutionEvents: StateEvent[] = events,
+  ) => {
+    const entries = ledgerFor(status, resolutionEvents);
+    state.ledger.push(...entries);
+    return entries;
+  };
   const c = state.character;
   const qiCost = normalizedAction.qiCost ?? (normalizedAction.kind === 'attack' ? 0 : normalizedAction.kind === 'meditate' ? 0 : 0);
   const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' ? 2 : normalizedAction.kind === 'travel' ? 2 : 1);
@@ -103,7 +125,7 @@ export function resolveAction(
         action: normalizedAction,
         state,
         events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
-        ledger: ledgerFor('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
+        ledger: persistLedger('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
         roll,
         difficulty: DIFFICULTY.travel,
       };
@@ -116,7 +138,7 @@ export function resolveAction(
       action: normalizedAction,
       state,
       events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
-      ledger: ledgerFor('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
+      ledger: persistLedger('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
       roll,
       difficulty: DIFFICULTY[normalizedAction.kind],
     };
@@ -236,6 +258,13 @@ export function resolveAction(
     blocked: 'The action cannot be attempted in the current state.',
   };
 
+  const ledger = persistLedger(status);
+
+  const finalIssues = validateState(state);
+  if (finalIssues.length > 0) {
+    throw new Error(`Resolver produced invalid state: ${finalIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
+  }
+
   const finalIssues = validateState(state);
   if (finalIssues.length > 0) {
     throw new Error(`Resolver produced invalid state: ${finalIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
@@ -247,7 +276,7 @@ export function resolveAction(
     action: normalizedAction,
     state,
     events,
-    ledger: ledgerFor(status),
+    ledger,
     roll,
     difficulty,
   };
