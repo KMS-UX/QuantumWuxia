@@ -54,7 +54,7 @@ export interface SimCharacter {
 export interface SimWorld {
   turn: number;
   locationIds: string[];
-  knownFacts: string[];
+  knownFacts: string[];\n  /** Player-known information only; world truth remains in jianghu. */\n  knownRumorIds?: string[];\n  knownNpcIds?: string[];
 }
 
 export interface SimulationState {
