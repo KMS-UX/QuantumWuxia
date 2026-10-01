@@ -8,7 +8,7 @@ import {
   selectNpcGoal,
 } from './npcAgency';
 import { createDefaultJianghu } from './jianghu';
-import { getNpcKnowledgeContext, canNpcKnowLedgerEntry } from './npcKnowledge';
+import { getNpcKnowledgeContext, canNpcKnowLedgerEntry, npcHasMemory } from './npcKnowledge';
 
 const simulation = {
   schemaVersion: 1 as const,
@@ -157,4 +157,17 @@ test('NPC knowledge cannot see unrelated ledger events', () => {
   const context = getNpcKnowledgeContext(jianghu, [visible, hidden], npc.id);
   assert.equal(context.knownLedgerEntries.length, 1);
   assert.equal(context.knownLedgerEntries[0].eventId, visible.eventId);
+});
+
+
+test('NPC memory query is deterministic and limited to the NPC memory history', () => {
+  const jianghu = createDefaultJianghu();
+  const npc = jianghu.npcs[0];
+  npc.memories = [
+    { id: 'memory-old', event: 'Heard a rumor about bandits', interpretation: 'Investigate the road', valence: 'neutral', confidence: 50, turn: 1 },
+    { id: 'memory-new', event: 'Spoke with a traveler', interpretation: 'The traveler seemed trustworthy', valence: 'positive', confidence: 80, turn: 2 },
+  ];
+
+  assert.equal(npcHasMemory(jianghu, npc.id, memory => memory.event.includes('rumor')), true);
+  assert.equal(npcHasMemory(jianghu, 'unknown-npc', () => true), false);
 });
