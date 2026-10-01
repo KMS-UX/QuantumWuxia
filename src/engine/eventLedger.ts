@@ -53,7 +53,7 @@ export function createEventLedger(
       .map(([, value]) => value);
 
     return {
-      eventId: `t${state.world.turn}-${index + 1}-${event.type}`,
+      eventId: `t${state.world.turn}-${state.ledger.length + index + 1}-${event.type}`,
       turn: typeof event.payload.turn === 'number' ? event.payload.turn : state.world.turn,
       actorId: action.actorId ?? state.character.id,
       actionKind: action.kind,
