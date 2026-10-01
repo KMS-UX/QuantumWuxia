@@ -54,7 +54,7 @@ export function createEventLedger(
 
     return {
       eventId: `t${state.world.turn}-${index + 1}-${event.type}`,
-      turn: state.world.turn,
+      turn: typeof event.payload.turn === 'number' ? event.payload.turn : state.world.turn,
       actorId: action.actorId ?? state.character.id,
       actionKind: action.kind,
       actionDescription: action.description,
