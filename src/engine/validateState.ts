@@ -26,7 +26,28 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
   if (!state.world.locationIds.includes(c.locationId)) {
     issues.push({ path: 'character.locationId', message: 'Current location must exist in world.locationIds.' });
   }
-  for (const [key, value] of Object.entries(c.attributes)) {
+  if (state.jianghu) {
+    if (state.jianghu.schemaVersion !== 1) {
+      issues.push({ path: 'jianghu.schemaVersion', message: 'Unsupported Jianghu schema version.' });
+    }
+    for (const npc of state.jianghu.npcs) {
+      if (!npc.id.trim() || !npc.name.trim()) issues.push({ path: `jianghu.npcs.${npc.id}`, message: 'NPC id and name must not be empty.' });
+      if (npc.disposition < -100 || npc.disposition > 100) issues.push({ path: `jianghu.npcs.${npc.id}.disposition`, message: 'NPC disposition must be within -100..100.' });
+      for (const memory of npc.memories) {
+        if (memory.confidence < 0 || memory.confidence > 100) issues.push({ path: `jianghu.npcs.${npc.id}.memories.${memory.id}.confidence`, message: 'Memory confidence must be within 0..100.' });
+      }
+    }
+    for (const faction of state.jianghu.factions) {
+      if (faction.resources < 0 || faction.resources > 100 || faction.influence < 0 || faction.influence > 100) {
+        issues.push({ path: `jianghu.factions.${faction.id}`, message: 'Faction resources and influence must be within 0..100.' });
+      }
+      if (faction.playerReputation < -100 || faction.playerReputation > 100) {
+        issues.push({ path: `jianghu.factions.${faction.id}.playerReputation`, message: 'Faction player reputation must be within -100..100.' });
+      }
+    }
+  }
+
+  for (const [key, value] of Object.entries(c.attributes))
     if (!Number.isFinite(value) || value < 0) {
       issues.push({ path: `character.attributes.${key}`, message: 'Attribute must be a finite non-negative number.' });
     }
