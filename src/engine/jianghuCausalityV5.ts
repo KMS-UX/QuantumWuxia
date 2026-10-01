@@ -32,7 +32,7 @@ function factionReaction(j: JianghuState, factionIds: string[], branch: V5Branch
     if (branch === 'escalate') faction.internalTension = clamp(faction.internalTension + severity * 3);
     if (branch === 'deescalate' || branch === 'suppress') faction.internalTension = clamp(faction.internalTension - severity * 2);
     if (branch === 'confirm') faction.influence = clamp(faction.influence + 1);
-    events.push({ type: 'world.faction_reaction', payload: { factionId: id, branch, tension: faction.internalTension } });
+    events.push({ type: 'world.faction_reaction', causes: [`causal-branch:${branch}`, `faction:${id}:reaction`], witnesses: [id], payload: { factionId: id, branch, tension: faction.internalTension } });
   }
 }
 function marketReaction(j: JianghuState, locationId: string | undefined, branch: V5Branch, severity: number, turn: number, events: StateEvent[]): void {
@@ -45,7 +45,7 @@ function marketReaction(j: JianghuState, locationId: string | undefined, branch:
     market.priceMultipliers[good] = Number((1 + market.scarcity[good] / 100).toFixed(2));
   }
   market.lastUpdatedTurn = turn;
-  events.push({ type: 'world.market_changed', payload: { locationId, turn, branch } });
+  events.push({ type: 'world.market_changed', causes: [`causal-branch:${branch}`, `location:${locationId}:market`], payload: { locationId, turn, branch } });
 }
 function verifyKnowledge(j: JianghuState, simulation: SimulationState, eventId: string, branch: V5Branch): void {
   for (const record of j.knowledgeRecords ?? []) {
@@ -105,13 +105,13 @@ export function advanceCausalityV5(input: JianghuState, simulation: SimulationSt
     if (root.locationId) {
       const label = branch === 'escalate' ? 'heightened tension' : branch === 'deescalate' ? 'calmer conditions' : 'unsettled conditions';
       const condition = ensureLocationCondition(j, root.locationId, root.id, label, root.severity, turn);
-      events.push({ type: 'world.location_reaction', payload: { locationId: condition.locationId, conditionId: condition.id, branch, severity: condition.severity } });
+      events.push({ type: 'world.location_reaction', causes: [`causal-branch:${branch}`, `root-event:${root.id}`], causalLinks: [root.id], payload: { locationId: condition.locationId, conditionId: condition.id, branch, severity: condition.severity } });
     }
     verifyKnowledge(j, simulation, root.id, branch);
-    events.push({ type: 'world.causal_branch_selected', payload: { chainId: chain.id, rootEventId: root.id, branch, step: chain.step } });
+    events.push({ type: 'world.causal_branch_selected', causes: [`causal-chain:${chain.id}`, `root-event:${root.id}`], causalLinks: [root.id], payload: { chainId: chain.id, rootEventId: root.id, branch, step: chain.step } });
     if (chain.step >= 3 || (root.severity <= 1 && (branch === 'deescalate' || branch === 'suppress'))) {
       chain.active = false; root.active = false;
-      events.push({ type: 'world.causal_chain_completed', payload: { chainId: chain.id, rootEventId: root.id, branch } });
+      events.push({ type: 'world.causal_chain_completed', causes: [`causal-chain:${chain.id}:completion`, `root-event:${root.id}`], causalLinks: [root.id], payload: { chainId: chain.id, rootEventId: root.id, branch } });
     }
   }
   return { jianghu: j, events };
