@@ -236,5 +236,5 @@ export function resolveAction(
     throw new Error(`Resolver produced invalid state: ${finalIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
   }
 
-  return { status, summary: summaries[status], normalizedAction, state, events, roll, difficulty };
+  return { status, summary: summaries[status], action: normalizedAction, state, events, roll, difficulty };
 }
