@@ -123,6 +123,33 @@ export interface MarketState {
   lastUpdatedTurn: number;
 }
 
+
+export type KnowledgeSourceKind = 'direct' | 'npc' | 'rumor' | 'document' | 'observation' | 'faction';
+
+export interface KnowledgeRecord {
+  id: string;
+  subjectId: string;
+  fact: string;
+  sourceId: string;
+  sourceKind: KnowledgeSourceKind;
+  confidence: number;
+  discoveredTurn: number;
+  lastVerifiedTurn?: number;
+  trueState?: 'true' | 'false' | 'unknown';
+}
+
+export interface CausalChainState {
+  id: string;
+  rootEventId: string;
+  step: number;
+  kind: 'information' | 'social' | 'faction' | 'economic' | 'personal';
+  description: string;
+  sourceIds: string[];
+  active: boolean;
+  createdTurn: number;
+  nextCheckTurn: number;
+}
+
 export interface JianghuState {
   schemaVersion: 1;
   npcs: NPCState[];
@@ -134,7 +161,9 @@ export interface JianghuState {
   knowledgeVersion: number;
   factionRelations?: FactionRelationState[];
   markets?: MarketState[];
-
+  knowledgeRecords?: KnowledgeRecord[];
+  causalChains?: CausalChainState[];
+}
 
 export const DEFAULT_JIANGHU: JianghuState = {
   schemaVersion: 1,
@@ -204,6 +233,8 @@ export const DEFAULT_JIANGHU: JianghuState = {
   obligations: [],
   worldEvents: [],
   knowledgeVersion: 1,
+  knowledgeRecords: [],
+  causalChains: [],
   factionRelations: [{ id: 'frel-jade-black', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', trust: 0, hostility: 15, trade: 30 }],
   markets: [{ locationId: 'The Crossroads', goods: { tea: 20, rice: 15, medicine: 8 }, basePrices: { tea: 4, rice: 3, medicine: 12 }, priceMultipliers: { tea: 1, rice: 1, medicine: 1 }, scarcity: { tea: 0, rice: 0, medicine: 20 }, lastUpdatedTurn: 0 }],
 };
@@ -219,6 +250,8 @@ function cloneJianghu(j: JianghuState): JianghuState {
     worldEvents: j.worldEvents.map(e => ({ ...e, factionIds: [...e.factionIds] })),
     factionRelations: (j.factionRelations ?? []).map(r => ({ ...r })),
     markets: (j.markets ?? []).map(m => ({ ...m, goods: { ...m.goods }, basePrices: { ...m.basePrices }, priceMultipliers: { ...m.priceMultipliers }, scarcity: { ...m.scarcity } })),
+    knowledgeRecords: (j.knowledgeRecords ?? []).map(k => ({ ...k })),
+    causalChains: (j.causalChains ?? []).map(chain => ({ ...chain, sourceIds: [...chain.sourceIds] })),
   };
 }
 
