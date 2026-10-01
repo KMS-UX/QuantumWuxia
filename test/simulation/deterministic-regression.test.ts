@@ -98,6 +98,25 @@ test('successful resolution is deterministic for identical state, action, and ro
   assert.equal(first.status, 'success');
 });
 
+test('ledger preserves explicit deterministic causes and knowledge consequences', () => {
+  const input = makeSimulation();
+  const result = resolveAction(
+    input,
+    makeAction({ kind: 'inspect', targetId: 'mountain' }),
+    99,
+  );
+
+  const factEntry = result.ledger.find(entry => entry.eventType === 'world.fact_discovered');
+  const resolutionEntry = result.ledger.find(entry => entry.eventType === 'action.resolved');
+
+  assert.ok(factEntry);
+  assert.deepEqual(factEntry.causes, ['action:inspect', 'target:mountain']);
+  assert.deepEqual(factEntry.witnesses, ['hero-1']);
+  assert.deepEqual(factEntry.knowledgeConsequences, ['player:fact:inspected:mountain']);
+  assert.ok(resolutionEntry);
+  assert.deepEqual(resolutionEntry.witnesses, ['hero-1']);
+});
+
 test('partial and failure outcomes are reproducible at their threshold bands', () => {
   const input = makeSimulation();
   const action = makeAction();
