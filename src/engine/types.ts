@@ -66,6 +66,8 @@ export interface SimulationState {
   world: SimWorld;
   /** Persistent world truth; never authored by the LLM. */
   jianghu?: JianghuState;
+  /** Authoritative deterministic history of resolved simulation events. */
+  ledger: EventLedgerEntry[];
 }
 
 export interface ProposedAction {
