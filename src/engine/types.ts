@@ -25,6 +25,7 @@ export interface SimCondition {
 }
 
 import type { WuxiaCharacter } from './wuxia';
+import type { JianghuState } from './jianghu';
 
 export interface SimCharacter {
   id: string;
@@ -82,7 +83,7 @@ export interface StateEvent {
     | 'character.injury_added'
     | 'character.social_changed'
     | 'world.location_changed'
-    | 'world.fact_discovered';
+    | 'world.fact_discovered'\n    | 'world.relationship_changed'\n    | 'world.npc_memory_added'\n    | 'world.jianghu_ticked';
   payload: Record<string, string | number | boolean | null>;
 }
 
