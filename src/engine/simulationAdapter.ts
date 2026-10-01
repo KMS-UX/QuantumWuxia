@@ -90,6 +90,15 @@ export function mergeSimulationState(gameState: GameState, simulation: Simulatio
         attributes: { ...simulation.character.attributes },
         conditions: simulation.character.conditions.map(condition => ({ ...condition })),
         inventory: [...simulation.character.inventory],
+        ...(simulation.character.wuxia ? {
+          wuxia: {
+            ...simulation.character.wuxia,
+            cultivation: { ...simulation.character.wuxia.cultivation },
+            martialArts: simulation.character.wuxia.martialArts.map(art => ({ ...art, techniques: art.techniques.map(technique => ({ ...technique })) })),
+            injuries: simulation.character.wuxia.injuries.map(injury => ({ ...injury })),
+            social: { ...simulation.character.wuxia.social },
+          },
+        } : {}),
       },
       world: {
         ...simulation.world,
