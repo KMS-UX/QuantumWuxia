@@ -1,4 +1,6 @@
-import type { SimulationState, StateEvent } from './types';
+import type { StateEvent } from './types';
+import type { EventLedgerEntry } from './eventLedger';
+import { getNpcKnowledgeContext } from './npcKnowledge';
 import type { JianghuState, NPCGoal, NPCState } from './jianghu';
 
 export type NPCPlanKind = NPCGoal['kind'];
@@ -44,6 +46,7 @@ export function evaluateNpcOpportunity(
   j: JianghuState,
   npc: NPCState,
   plan: NPCPlan,
+  ledger: EventLedgerEntry[] = [],
 ): NPCOpportunity {
   switch (plan.kind) {
     case 'travel':
@@ -56,14 +59,20 @@ export function evaluateNpcOpportunity(
         ? { available: true, reason: 'local-market-and-resources-available' }
         : { available: false, reason: 'no-local-market-or-resources' };
     }
-    case 'collect_debt':
-      return j.obligations.some(obligation => !obligation.fulfilled && obligation.creditorId === npc.id)
-        ? { available: true, reason: 'unfulfilled-obligation-found' }
-        : { available: false, reason: 'no-unfulfilled-obligation' };
-    case 'investigate':
-      return j.rumors.some(rumor => rumor.currentLocationId === npc.locationId && rumor.knownBy.includes(npc.id))
+    case 'collect_debt': {
+      const knownObligation = j.obligations.some(obligation =>
+        !obligation.fulfilled && obligation.creditorId === npc.id,
+      );
+      return knownObligation
+        ? { available: true, reason: 'known-unfulfilled-obligation' }
+        : { available: false, reason: 'no-known-unfulfilled-obligation' };
+    }
+    case 'investigate': {
+      const knowledge = getNpcKnowledgeContext(j, ledger, npc.id);
+      return knowledge.knownRumors.some(rumor => rumor.currentLocationId === npc.locationId)
         ? { available: true, reason: 'known-local-rumor-available' }
         : { available: false, reason: 'no-known-local-rumor' };
+    }
     case 'protect':
       return j.worldEvents.some(event => event.active && event.locationId === npc.locationId)
         ? { available: true, reason: 'active-local-event' }

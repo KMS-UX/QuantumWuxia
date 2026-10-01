@@ -234,6 +234,13 @@ Narrative text should remain separate from the machine event record.
 - [x] Emit structured causal events for NPC actions.
 - [x] Add deterministic regression coverage for agency selection and execution.
 
+### Phase 5.2 — NPC knowledge boundary
+
+- [x] Add a deterministic NPC knowledge context over memories, known rumors, and persisted ledger events.
+- [x] Restrict ledger visibility to authored, witnessed, or explicitly granted NPC knowledge.
+- [x] Make investigation agency consume NPC-known rumors rather than global rumor truth.
+- [x] Add regression coverage proving unrelated ledger events remain hidden.
+
 After stabilization, build NPC agency as:
 
 `Goal → Plan → Opportunity → Action → Consequence`
