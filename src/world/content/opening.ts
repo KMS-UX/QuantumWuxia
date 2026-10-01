@@ -1,5 +1,6 @@
 import type { Character, GameChoice, InventoryItem } from '../../types/game';
 import { LOCATIONS } from './locations';
+import { NPC_PROFILES } from './jianghuSeed';
 import { ORIGINS, type OriginProfile } from './origins';
 
 export interface OriginOpening {
@@ -77,5 +78,16 @@ export function createOriginCharacter(
     background: `${origin.summary} ${origin.hook}`,
     originId: origin.id,
     fantasyPreset,
+  };
+}
+
+/** Presentation data the narrator digest needs; kept out of the engine on purpose. */
+export function buildDigestOptions(): { npcVoices: Record<string, string>; locationNotes: Record<string, string> } {
+  return {
+    npcVoices: Object.fromEntries(NPC_PROFILES.map(p => [p.npc.id, p.voice])),
+    locationNotes: Object.fromEntries(LOCATIONS.map(l => [
+      l.id,
+      `${l.summary} Observable features: ${l.features.join(', ')}. Hazards: ${l.hazards.join(', ')}.`,
+    ])),
   };
 }

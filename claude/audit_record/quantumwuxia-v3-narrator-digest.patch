@@ -1,0 +1,464 @@
+diff --git a/doc/AUDIT_2026-10-01.md b/doc/AUDIT_2026-10-01.md
+index f219805..b1f4638 100644
+--- a/doc/AUDIT_2026-10-01.md
++++ b/doc/AUDIT_2026-10-01.md
+@@ -99,3 +99,17 @@ New folder `src/world/content/`, pure data + pure builders, no React/Zustand/LLM
+ - New opening helpers provide the authored scenario and the legacy-character compatibility adapter.
+ 
+ Findings 1 and 2 in section 4 are resolved. Still open: the narrator event digest, seeded RNG, legacy Combat migration, LLM schema validation, and legacy HP/mana versus simulation HP/Qi duplication.
++
++## 8. Follow-up applied: the narrator now hears what the player perceived
++
++**Gap found:** the engine already tracked player knowledge (`rumor.knownBy`, `knownRumorIds`, `knowledgeRecords`), but nothing ever told the player anything: a successful conversation changed trust by +1 and nothing else, so the narrator had to invent what NPCs said.
++
++- `src/engine/npcDisclosure.ts`: on a **successful** `talk`, the NPC shares at most one rumor they know and the player does not (highest credibility, ties by id). Recorded as a `world.fact_discovered` event with provenance (`via`), a knowledge record, and `knownRumorIds`. Secrets are never disclosed here. Failed or partial conversations teach nothing.
++- `src/engine/narratorDigest.ts`: a pure **player-perception filter** over the resolution. It includes the action and outcome, only events the player witnessed (travel, hearsay told to them, injuries), who is visibly present, the observable public situation at the location, and the target NPC's speaking voice. It never includes NPC secrets, goals, fears, offscreen NPC actions or faction bookkeeping. It ends with explicit narration rules.
++- Presentation data (NPC voices, location features) stays in the content layer and is passed in via `buildDigestOptions()`; the engine does not import content.
++- The store sends the digest for origin characters instead of "The action succeeds…". The context prompt shows Qi and Origin instead of Mana, Race, Level and Gold for them.
++- Tests (`test/simulation/narrator-digest.test.ts`): disclosure with provenance, failure teaches nothing, repeat talk yields "nothing new", hearsay wording, travel and public situation, determinism and non-mutation, and a **leak guard** that runs every origin × opening choice × 3 rolls and fails if any NPC secret, goal description, or non-public fear, or the name of an offscreen NPC the player was not told about, appears in the digest. Suite: 58 / 58.
++
++**New finding (pacing, not changed):** every starting world event's causal chain completes within about 4 turns, including "The Autumn Assembly Approaches" (expires turn 60). Chains are capped at 3 steps by design (v4), so the seed's slow-burn tensions resolve far faster than their authored timescale. Options: raise the step cap per event kind, add a `pace` field to world events, or let chain steps wait several turns. This is an engine design decision, so I left it for you.
++
++**Still open:** LLM output schema validation and later-turn `locationChange` (unvalidated), seeded rolls, legacy `Combat.tsx`, legacy-vs-simulation HP/mana duplication, resolver depth (techniques, Qi costs, damage).
+diff --git a/src/engine/narratorDigest.ts b/src/engine/narratorDigest.ts
+new file mode 100644
+index 0000000..4395884
+--- /dev/null
++++ b/src/engine/narratorDigest.ts
+@@ -0,0 +1,118 @@
++import type { ActionResolution, StateEvent } from './types';
++
++export interface NarratorDigestOptions {
++  /** How an NPC speaks, keyed by NPC id (presentation data from the content layer). */
++  npcVoices?: Record<string, string>;
++  /** Observable description of a place (summary, features), keyed by location id. */
++  locationNotes?: Record<string, string>;
++}
++
++const STATUS_TEXT: Record<ActionResolution['status'], string> = {
++  success: 'SUCCESS: the player achieved what they set out to do.',
++  partial: 'PARTIAL SUCCESS: the player achieved part of their aim, with a complication or cost.',
++  failure: 'FAILURE: the player did not achieve their aim.',
++  blocked: 'BLOCKED: the action could not be attempted.',
++};
++
++const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined);
++const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
++
++/**
++ * Build the narrator's briefing for one resolved turn.
++ *
++ * The digest is a *player-perception filter* over the deterministic result: it
++ * lists only what the player did, saw, heard, or felt this turn, and who and what
++ * is observably present. NPC secrets, goals, fears, offscreen NPC actions, faction
++ * bookkeeping and hidden truth values are never included, so the narrator cannot
++ * leak them. Pure and deterministic.
++ */
++export function buildNarratorDigest(resolution: ActionResolution, options: NarratorDigestOptions = {}): string {
++  const { state, action, events } = resolution;
++  const playerId = state.character.id;
++  const here = state.character.locationId;
++  const jianghu = state.jianghu;
++  const npcName = (id: string | undefined) => jianghu?.npcs.find(n => n.id === id)?.name ?? id ?? 'someone';
++  const witnessed = (e: StateEvent) => e.witnesses?.includes(playerId) ?? false;
++
++  const lines: string[] = [];
++  lines.push(`Action: ${action.description} (${action.kind})`);
++  lines.push(`Outcome: ${STATUS_TEXT[resolution.status]}`);
++
++  // What the player perceived because of their own action.
++  const happened: string[] = [];
++  for (const e of events) {
++    switch (e.type) {
++      case 'world.location_changed':
++        if (witnessed(e)) happened.push(`You travelled from ${str(e.payload.from)} to ${str(e.payload.to)}.`);
++        break;
++      case 'world.fact_discovered': {
++        if (!witnessed(e)) break;
++        const fact = str(e.payload.fact);
++        const via = str(e.payload.via);
++        if (fact?.startsWith('inspected:')) {
++          happened.push(`You examined ${fact.slice('inspected:'.length)} closely.`);
++        } else if (fact && via) {
++          happened.push(`${npcName(via)} told you this, as hearsay you cannot yet verify (credibility about ${num(e.payload.confidence) ?? '?'}/100): "${fact}"`);
++        } else if (fact) {
++          happened.push(`You learned (unverified): "${fact}"`);
++        }
++        break;
++      }
++      case 'character.social_changed':
++        if (witnessed(e) && action.kind === 'talk') happened.push(`The conversation went well; ${npcName(action.targetId)} warmed to you slightly.`);
++        break;
++      case 'character.injury_added':
++        happened.push(`You suffered a minor ${str(e.payload.bodyRegion) ?? 'physical'} injury.`);
++        break;
++      case 'character.hp_changed':
++        if ((num(e.payload.amount) ?? 0) < 0) happened.push(`You lost ${Math.abs(num(e.payload.amount) ?? 0)} HP.`);
++        break;
++      default:
++        break;
++    }
++  }
++  if (action.kind === 'talk' && action.targetId && (resolution.status === 'success' || resolution.status === 'partial')
++      && !events.some(e => e.type === 'world.fact_discovered' && e.payload.via === action.targetId)) {
++    happened.push(`${npcName(action.targetId)} has nothing new to tell you right now; keep the exchange to courtesy and atmosphere.`);
++  }
++  if (state.character.fatigue >= 70) happened.push('You are visibly weary.');
++  lines.push('', 'What the player perceived this turn:');
++  lines.push(...(happened.length ? happened.map(h => `- ${h}`) : ['- Nothing notable beyond the attempt itself.']));
++
++  // Observable surroundings.
++  lines.push('', `Current location: ${here}`);
++  const note = options.locationNotes?.[here];
++  if (note) lines.push(note);
++
++  if (jianghu) {
++    const present = jianghu.npcs.filter(n => n.alive && n.locationId === here);
++    lines.push('', 'People visibly present:');
++    lines.push(...(present.length ? present.map(n => `- ${n.name} (${n.role})`) : ['- No one of note.']));
++
++    const target = action.targetId ? jianghu.npcs.find(n => n.id === action.targetId) : undefined;
++    const voice = target ? options.npcVoices?.[target.id] : undefined;
++    if (target && voice) lines.push('', `How ${target.name} speaks: ${voice}`);
++
++    const advanced = new Map<string, number>();
++    for (const e of events) {
++      if (e.type === 'world.causal_chain_advanced') advanced.set(str(e.payload.rootEventId) ?? '', num(e.payload.step) ?? 0);
++    }
++    const conditions = jianghu.worldEvents.filter(w => w.active && w.locationId === here);
++    if (conditions.length) {
++      lines.push('', 'Public situation here (visible to anyone present):');
++      for (const w of conditions) {
++        const step = advanced.get(w.id);
++        lines.push(`- ${w.title}: ${w.description}${step ? ` Tension is building (stage ${step}).` : ''}`);
++      }
++    }
++  }
++
++  lines.push(
++    '',
++    'Narration rules for this turn:',
++    '- Narrate only the facts above. Do not invent named people, places, factions or items that are not listed.',
++    '- Do not reveal any NPC\'s secrets, private goals or offscreen activity; the player does not know them.',
++    '- Do not move the player or change any numbers; the simulation has already decided the outcome.',
++  );
++  return lines.join('\n');
++}
+diff --git a/src/engine/npcDisclosure.ts b/src/engine/npcDisclosure.ts
+new file mode 100644
+index 0000000..ff9ccae
+--- /dev/null
++++ b/src/engine/npcDisclosure.ts
+@@ -0,0 +1,59 @@
++import type { JianghuState, RumorState } from './jianghu';
++import type { SimulationState, StateEvent } from './types';
++
++/**
++ * Deterministic NPC disclosure: when the player talks successfully with an NPC,
++ * that NPC shares at most ONE rumor they know and the player does not, the most
++ * credible first (ties broken by id). The rumor becomes player knowledge through
++ * the same fields the knowledge system already reads (`knownBy`, `knownRumorIds`,
++ * `knowledgeRecords`), and the transfer is recorded as a `world.fact_discovered`
++ * event so the ledger can explain why the player knows it.
++ *
++ * Secrets are deliberately never disclosed here; they surface only through the
++ * existing disposition-gated knowledge path.
++ */
++export function discloseRumorToPlayer(
++  jianghu: JianghuState,
++  simulation: SimulationState,
++  npcId: string,
++): { jianghu: JianghuState; events: StateEvent[] } {
++  const playerId = simulation.character.id;
++  const npc = jianghu.npcs.find(n => n.id === npcId);
++  if (!npc || !npc.alive || npc.locationId !== simulation.character.locationId) return { jianghu, events: [] };
++
++  const shareable = jianghu.rumors
++    .filter(r => r.knownBy.includes(npc.id) && !r.knownBy.includes(playerId))
++    .sort((a: RumorState, b: RumorState) => b.credibility - a.credibility || a.id.localeCompare(b.id));
++  const chosen = shareable[0];
++  if (!chosen) return { jianghu, events: [] };
++
++  const next: JianghuState = JSON.parse(JSON.stringify(jianghu));
++  const rumor = next.rumors.find(r => r.id === chosen.id)!;
++  rumor.knownBy.push(playerId);
++
++  next.knowledgeRecords = next.knowledgeRecords ?? [];
++  next.knowledgeRecords.push({
++    id: `knowledge-rumor-${rumor.id}-${playerId}`,
++    subjectId: playerId,
++    fact: rumor.text,
++    sourceId: rumor.id,
++    sourceKind: 'rumor',
++    confidence: rumor.credibility,
++    discoveredTurn: simulation.world.turn,
++    trueState: 'unknown',
++  });
++  next.knowledgeVersion += 1;
++  simulation.world.knownRumorIds = Array.from(new Set([...(simulation.world.knownRumorIds ?? []), rumor.id]));
++
++  return {
++    jianghu: next,
++    events: [{
++      type: 'world.fact_discovered',
++      causes: ['action:talk', 'resolution:success', `npc:${npc.id}:disclosure`],
++      witnesses: [playerId, npc.id],
++      knowledgeConsequences: [`player:fact:${rumor.text}`],
++      causalLinks: [rumor.id],
++      payload: { fact: rumor.text, source: rumor.id, via: npc.id, confidence: rumor.credibility },
++    }],
++  };
++}
+diff --git a/src/engine/resolveAction.ts b/src/engine/resolveAction.ts
+index 57a1f21..6635b03 100644
+--- a/src/engine/resolveAction.ts
++++ b/src/engine/resolveAction.ts
+@@ -1,3 +1,4 @@
++import { discloseRumorToPlayer } from './npcDisclosure';
+ import type {
+   ActionResolution,
+   ProposedAction,
+@@ -235,6 +236,12 @@ export function resolveAction(
+     c.conditions = synced.conditions;
+   }
+ 
++  if (state.jianghu && status === 'success' && normalizedAction.kind === 'talk' && normalizedAction.targetId) {
++    const disclosure = discloseRumorToPlayer(state.jianghu, state, normalizedAction.targetId);
++    state.jianghu = disclosure.jianghu;
++    events.push(...disclosure.events);
++  }
++
+   if (state.jianghu) {
+     const interaction = applyJianghuAction(state.jianghu, state, normalizedAction);
+     state.jianghu = interaction.jianghu;
+diff --git a/src/services/llmService.ts b/src/services/llmService.ts
+index ac7fc18..e227e63 100644
+--- a/src/services/llmService.ts
++++ b/src/services/llmService.ts
+@@ -52,12 +52,19 @@ function buildContextPrompt(state: GameState, playerAction: string): string {
+   if (character) {
+     context += `### Character\n`;
+     context += `- Name: ${character.name}\n`;
++    if (character.originId) {
++      // Wuxia origin: no race/level/gold bookkeeping; mana is Qi here.
++      context += `- Origin: ${character.class}\n`;
++      context += `- HP: ${character.stats.currentHp}/${character.stats.maxHp}\n`;
++      context += `- Qi: ${character.stats.currentMana}/${character.stats.maxMana}\n`;
++    } else {
+     context += `- Class: ${character.class}\n`;
+     context += `- Race: ${character.race}\n`;
+     context += `- Level: ${character.level}\n`;
+     context += `- HP: ${character.stats.currentHp}/${character.stats.maxHp}\n`;
+     context += `- Mana: ${character.stats.currentMana}/${character.stats.maxMana}\n`;
+     context += `- Gold: ${character.gold}\n`;
++    }
+     context += `- Stats: STR ${character.stats.strength}, AGI ${character.stats.agility}, INT ${character.stats.intelligence}, CHA ${character.stats.charisma}, LCK ${character.stats.luck}\n`;
+     context += `- Skills: ${character.skills.join(', ') || 'None'}\n`;
+     context += `- Inventory: ${character.inventory.map(i => `${i.name} x${i.quantity}`).join(', ') || 'Empty'}\n\n`;
+diff --git a/src/store/gameStore.ts b/src/store/gameStore.ts
+index 3206f39..b8b330a 100644
+--- a/src/store/gameStore.ts
++++ b/src/store/gameStore.ts
+@@ -10,7 +10,8 @@ import { changeTracker } from '../services/changeTracker';
+ import { soundManager } from '../services/soundManager';
+ import { resolvePlayerAction } from '../engine/actionPipeline';
+ import { createSimulationState } from '../engine/simulationAdapter';
+-import { FANTASY_PRESETS, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
++import { buildNarratorDigest } from '../engine/narratorDigest';
++import { FANTASY_PRESETS, buildDigestOptions, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
+ import type { SimulationState } from '../engine/types';
+ 
+ interface GameStore {
+@@ -346,7 +347,9 @@ export const useGameStore = create<GameStore>()(
+           const selectedChoice = gameState.turns[gameState.turns.length - 1]?.choices.find(c => c.id === choiceId);
+           const prepared = resolvePlayerAction(gameState, choiceText, selectedChoice?.risk ?? 'medium');
+           const resolvedState = prepared.nextGameState;
+-          const resolutionContext = `[Resolved action: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
++          const resolutionContext = gameState.character?.originId
++            ? `[Resolved action]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
++            : `[Resolved action: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+ 
+           let response: LLMResponse;
+           if (isDemoMode) {
+diff --git a/src/world/content/opening.ts b/src/world/content/opening.ts
+index eec35cd..9e8bff1 100644
+--- a/src/world/content/opening.ts
++++ b/src/world/content/opening.ts
+@@ -1,5 +1,6 @@
+ import type { Character, GameChoice, InventoryItem } from '../../types/game';
+ import { LOCATIONS } from './locations';
++import { NPC_PROFILES } from './jianghuSeed';
+ import { ORIGINS, type OriginProfile } from './origins';
+ 
+ export interface OriginOpening {
+@@ -79,3 +80,14 @@ export function createOriginCharacter(
+     fantasyPreset,
+   };
+ }
++
++/** Presentation data the narrator digest needs; kept out of the engine on purpose. */
++export function buildDigestOptions(): { npcVoices: Record<string, string>; locationNotes: Record<string, string> } {
++  return {
++    npcVoices: Object.fromEntries(NPC_PROFILES.map(p => [p.npc.id, p.voice])),
++    locationNotes: Object.fromEntries(LOCATIONS.map(l => [
++      l.id,
++      `${l.summary} Observable features: ${l.features.join(', ')}. Hazards: ${l.hazards.join(', ')}.`,
++    ])),
++  };
++}
+diff --git a/test/simulation/narrator-digest.test.ts b/test/simulation/narrator-digest.test.ts
+new file mode 100644
+index 0000000..afb9718
+--- /dev/null
++++ b/test/simulation/narrator-digest.test.ts
+@@ -0,0 +1,103 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
++import { discloseRumorToPlayer } from '../../src/engine/npcDisclosure';
++import { buildNarratorDigest } from '../../src/engine/narratorDigest';
++import { resolveAction } from '../../src/engine/resolveAction';
++import { validateState } from '../../src/engine/validateState';
++import { NPC_PROFILES, ORIGINS, buildDigestOptions, createWuxiaSimulation } from '../../src/world/content';
++
++const options = buildDigestOptions();
++const start = () => createWuxiaSimulation('origin-disgraced-disciple');
++const play = (sim: ReturnType<typeof start>, text: string, roll: number) =>
++  resolveAction(sim, interpretPlayerAction(text, sim, 'medium'), roll);
++
++const PUBLIC_TEXT = Object.values(options.locationNotes).join(' ').toLowerCase();
++// Fears are short generic words ("bandits", "winter") that can legitimately be public location hazards,
++// so only fears that are not public location text count as leaks. Secrets and goals always count.
++const SECRETS = NPC_PROFILES.flatMap(p => [
++  ...p.npc.secrets,
++  ...p.npc.goals.map(g => g.description),
++  ...p.npc.fears.filter(f => !PUBLIC_TEXT.includes(f.toLowerCase())),
++]);
++
++test('a successful conversation transfers exactly one rumor to the player, with provenance', () => {
++  const result = play(start(), 'Talk to Old Tea Keeper', 60);
++  assert.equal(result.status, 'success');
++  assert.ok(result.state.world.knownRumorIds?.includes('rumor-toll-hike'));
++  const rumor = result.state.jianghu!.rumors.find(r => r.id === 'rumor-toll-hike')!;
++  assert.ok(rumor.knownBy.includes('player'));
++  const told = result.events.filter(e => e.type === 'world.fact_discovered' && e.payload.via === 'npc-teahouse-keeper');
++  assert.equal(told.length, 1);
++  assert.ok(told[0].witnesses?.includes('player'));
++  assert.equal(result.state.jianghu!.knowledgeRecords!.filter(k => k.sourceId === 'rumor-toll-hike').length, 1);
++  assert.deepStrictEqual(validateState(result.state), []);
++});
++
++test('a failed conversation teaches nothing', () => {
++  const result = play(start(), 'Talk to Old Tea Keeper', 5);
++  assert.equal(result.status, 'failure');
++  assert.ok(!result.state.world.knownRumorIds?.includes('rumor-toll-hike'));
++  assert.ok(!buildNarratorDigest(result, options).includes('hearsay'));
++  assert.ok(buildNarratorDigest(result, options).includes('FAILURE'));
++});
++
++test('talking again yields nothing new rather than inventing content', () => {
++  const first = play(start(), 'Talk to Old Tea Keeper', 60);
++  const second = play(first.state, 'Talk to Old Tea Keeper', 60);
++  assert.equal(second.events.filter(e => e.type === 'world.fact_discovered' && e.payload.via).length, 0);
++  assert.ok(buildNarratorDigest(second, options).includes('nothing new to tell you'));
++});
++
++test('the digest names the rumor as unverified hearsay and carries the speaker\'s voice', () => {
++  const digest = buildNarratorDigest(play(start(), 'Talk to Old Tea Keeper', 60), options);
++  assert.ok(digest.includes('Old Tea Keeper told you this, as hearsay'));
++  assert.ok(digest.includes('Black River will double the Lantern Ferry toll'));
++  assert.ok(digest.includes('How Old Tea Keeper speaks:'));
++  assert.ok(digest.includes('Narrate only the facts above'));
++});
++
++test('the digest never leaks secrets, goals, fears or offscreen NPCs (all origins, all opening choices, several rolls)', () => {
++  assert.ok(SECRETS.length > 20);
++  for (const origin of ORIGINS) {
++    for (const choice of origin.openingChoices) {
++      for (const roll of [5, 50, 95]) {
++        const sim = createWuxiaSimulation(origin.id);
++        const result = resolveAction(sim, interpretPlayerAction(choice.intent, sim, choice.risk), roll);
++        const fullDigest = buildNarratorDigest(result, options);
++        // The first line echoes the player's own typed intent, which may name anyone; that is not a leak.
++        const digest = fullDigest.split('\n').slice(1).join('\n');
++        for (const secret of SECRETS) {
++          assert.ok(!digest.includes(secret), `${origin.id}/${choice.label}@${roll} leaked: ${secret}`);
++        }
++        const here = result.state.character.locationId;
++        for (const p of NPC_PROFILES) {
++          if (p.npc.locationId === here) continue;
++          // An NPC elsewhere may only be named if the player was told about them in this turn's events.
++          const told = result.events.some(e => e.type === 'world.fact_discovered' && String(e.payload.fact).includes(p.npc.name));
++          if (!told) assert.ok(!digest.includes(p.npc.name), `${origin.id}/${choice.label}@${roll} named offscreen ${p.npc.name}`);
++        }
++        assert.ok(!digest.includes('npc_action') && !digest.includes('goal-'));
++      }
++    }
++  }
++});
++
++test('travel is described and the destination\'s public situation is visible', () => {
++  const result = play(start(), 'Travel to Lantern Ferry', 60);
++  const digest = buildNarratorDigest(result, options);
++  assert.ok(digest.includes('You travelled from The Crossroads to Lantern Ferry.'));
++  assert.ok(digest.includes('The Ferry Toll Dispute'));
++  assert.ok(digest.includes('Captain Ma Tie (ferry captain, Black River Brotherhood)'));
++});
++
++test('digest and disclosure are deterministic and the disclosure helper does not mutate its input', () => {
++  const a = buildNarratorDigest(play(start(), 'Talk to Old Tea Keeper', 60), options);
++  const b = buildNarratorDigest(play(start(), 'Talk to Old Tea Keeper', 60), options);
++  assert.equal(a, b);
++  const sim = start();
++  const before = JSON.stringify(sim.jianghu);
++  discloseRumorToPlayer(sim.jianghu!, sim, 'npc-teahouse-keeper');
++  assert.equal(JSON.stringify(sim.jianghu), before);
++  assert.deepStrictEqual(discloseRumorToPlayer(sim.jianghu!, sim, 'npc-gu-wen').events, []);
++});
+diff --git a/test/simulation/wuxia-content.test.ts b/test/simulation/wuxia-content.test.ts
+index c96e775..9827bc9 100644
+--- a/test/simulation/wuxia-content.test.ts
++++ b/test/simulation/wuxia-content.test.ts
+@@ -119,3 +119,42 @@ test('a 25-turn scripted campaign stays valid and is reproducible', () => {
+   };
+   assert.deepStrictEqual(play(), play());
+ });
++
++test('every origin opening is authored, self-consistent and playable from the legacy character', async () => {
++  const { buildOriginOpening, buildOriginScenario, createOriginCharacter, findOrigin } = await import('../../src/world/content');
++  for (const origin of ORIGINS) {
++    const opening = buildOriginOpening(origin);
++    assert.equal(opening.location, origin.startLocationId);
++    assert.equal(opening.choices.length, 5);
++    assert.deepStrictEqual(opening.choices.map(c => c.id), [1, 2, 3, 4, 5]);
++    assert.ok(opening.narrative.includes(origin.hook));
++    assert.ok(buildOriginScenario(origin).includes(origin.startLocationId));
++
++    const character = createOriginCharacter(origin, '  ', 'char-1', 'living_legends');
++    assert.equal(character.name, 'Wanderer');
++    assert.equal(character.originId, origin.id);
++    assert.equal(findOrigin(character.originId!)?.id, origin.id);
++    assert.ok(character.stats.maxHp > 0 && character.stats.currentHp === character.stats.maxHp);
++    assert.equal(character.inventory.length, origin.inventory.length);
++    assert.ok(Object.values(character.stats).every(v => Number.isFinite(v) && v >= 1));
++
++    // The simulation built for this origin starts where the opening says it does.
++    const sim = createWuxiaSimulation(origin.id, FANTASY_PRESETS.living_legends, character.name);
++    assert.equal(sim.character.locationId, opening.location);
++    assert.ok(sim.world.locationIds.includes(opening.location));
++    assert.equal(sim.character.name, 'Wanderer');
++  }
++});
++
++test('travel is possible from every origin start (the live world is no longer one room)', () => {
++  for (const origin of ORIGINS) {
++    const start = createWuxiaSimulation(origin.id);
++    const neighbour = TRAVEL_EDGES.find(e => e.a === origin.startLocationId || e.b === origin.startLocationId)!;
++    const destination = neighbour.a === origin.startLocationId ? neighbour.b : neighbour.a;
++    const action = interpretPlayerAction(`Travel to ${destination}`, start, 'medium');
++    assert.equal(action.kind, 'travel');
++    const result = resolveAction(start, action, 95);
++    assert.deepStrictEqual(validateState(result.state), []);
++    assert.equal(result.state.character.locationId, destination, `${origin.id}: should reach ${destination}`);
++  }
++});

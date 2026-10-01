@@ -10,7 +10,8 @@ import { changeTracker } from '../services/changeTracker';
 import { soundManager } from '../services/soundManager';
 import { resolvePlayerAction } from '../engine/actionPipeline';
 import { createSimulationState } from '../engine/simulationAdapter';
-import { FANTASY_PRESETS, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
+import { buildNarratorDigest } from '../engine/narratorDigest';
+import { FANTASY_PRESETS, buildDigestOptions, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
 import type { SimulationState } from '../engine/types';
 
 interface GameStore {
@@ -346,7 +347,9 @@ export const useGameStore = create<GameStore>()(
           const selectedChoice = gameState.turns[gameState.turns.length - 1]?.choices.find(c => c.id === choiceId);
           const prepared = resolvePlayerAction(gameState, choiceText, selectedChoice?.risk ?? 'medium');
           const resolvedState = prepared.nextGameState;
-          const resolutionContext = `[Resolved action: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+          const resolutionContext = gameState.character?.originId
+            ? `[Resolved action]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
+            : `[Resolved action: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
 
           let response: LLMResponse;
           if (isDemoMode) {

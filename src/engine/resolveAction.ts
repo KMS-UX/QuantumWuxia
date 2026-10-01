@@ -1,3 +1,4 @@
+import { discloseRumorToPlayer } from './npcDisclosure';
 import type {
   ActionResolution,
   ProposedAction,
@@ -233,6 +234,12 @@ export function resolveAction(
       .filter(injury => injury.healingTurns > 0);
     const synced = syncInjuries(c as typeof c & { wuxia: NonNullable<typeof c.wuxia> });
     c.conditions = synced.conditions;
+  }
+
+  if (state.jianghu && status === 'success' && normalizedAction.kind === 'talk' && normalizedAction.targetId) {
+    const disclosure = discloseRumorToPlayer(state.jianghu, state, normalizedAction.targetId);
+    state.jianghu = disclosure.jianghu;
+    events.push(...disclosure.events);
   }
 
   if (state.jianghu) {

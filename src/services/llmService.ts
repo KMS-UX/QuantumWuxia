@@ -52,12 +52,19 @@ function buildContextPrompt(state: GameState, playerAction: string): string {
   if (character) {
     context += `### Character\n`;
     context += `- Name: ${character.name}\n`;
+    if (character.originId) {
+      // Wuxia origin: no race/level/gold bookkeeping; mana is Qi here.
+      context += `- Origin: ${character.class}\n`;
+      context += `- HP: ${character.stats.currentHp}/${character.stats.maxHp}\n`;
+      context += `- Qi: ${character.stats.currentMana}/${character.stats.maxMana}\n`;
+    } else {
     context += `- Class: ${character.class}\n`;
     context += `- Race: ${character.race}\n`;
     context += `- Level: ${character.level}\n`;
     context += `- HP: ${character.stats.currentHp}/${character.stats.maxHp}\n`;
     context += `- Mana: ${character.stats.currentMana}/${character.stats.maxMana}\n`;
     context += `- Gold: ${character.gold}\n`;
+    }
     context += `- Stats: STR ${character.stats.strength}, AGI ${character.stats.agility}, INT ${character.stats.intelligence}, CHA ${character.stats.charisma}, LCK ${character.stats.luck}\n`;
     context += `- Skills: ${character.skills.join(', ') || 'None'}\n`;
     context += `- Inventory: ${character.inventory.map(i => `${i.name} x${i.quantity}`).join(', ') || 'Empty'}\n\n`;

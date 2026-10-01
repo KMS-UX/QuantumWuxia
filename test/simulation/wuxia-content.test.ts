@@ -119,3 +119,42 @@ test('a 25-turn scripted campaign stays valid and is reproducible', () => {
   };
   assert.deepStrictEqual(play(), play());
 });
+
+test('every origin opening is authored, self-consistent and playable from the legacy character', async () => {
+  const { buildOriginOpening, buildOriginScenario, createOriginCharacter, findOrigin } = await import('../../src/world/content');
+  for (const origin of ORIGINS) {
+    const opening = buildOriginOpening(origin);
+    assert.equal(opening.location, origin.startLocationId);
+    assert.equal(opening.choices.length, 5);
+    assert.deepStrictEqual(opening.choices.map(c => c.id), [1, 2, 3, 4, 5]);
+    assert.ok(opening.narrative.includes(origin.hook));
+    assert.ok(buildOriginScenario(origin).includes(origin.startLocationId));
+
+    const character = createOriginCharacter(origin, '  ', 'char-1', 'living_legends');
+    assert.equal(character.name, 'Wanderer');
+    assert.equal(character.originId, origin.id);
+    assert.equal(findOrigin(character.originId!)?.id, origin.id);
+    assert.ok(character.stats.maxHp > 0 && character.stats.currentHp === character.stats.maxHp);
+    assert.equal(character.inventory.length, origin.inventory.length);
+    assert.ok(Object.values(character.stats).every(v => Number.isFinite(v) && v >= 1));
+
+    // The simulation built for this origin starts where the opening says it does.
+    const sim = createWuxiaSimulation(origin.id, FANTASY_PRESETS.living_legends, character.name);
+    assert.equal(sim.character.locationId, opening.location);
+    assert.ok(sim.world.locationIds.includes(opening.location));
+    assert.equal(sim.character.name, 'Wanderer');
+  }
+});
+
+test('travel is possible from every origin start (the live world is no longer one room)', () => {
+  for (const origin of ORIGINS) {
+    const start = createWuxiaSimulation(origin.id);
+    const neighbour = TRAVEL_EDGES.find(e => e.a === origin.startLocationId || e.b === origin.startLocationId)!;
+    const destination = neighbour.a === origin.startLocationId ? neighbour.b : neighbour.a;
+    const action = interpretPlayerAction(`Travel to ${destination}`, start, 'medium');
+    assert.equal(action.kind, 'travel');
+    const result = resolveAction(start, action, 95);
+    assert.deepStrictEqual(validateState(result.state), []);
+    assert.equal(result.state.character.locationId, destination, `${origin.id}: should reach ${destination}`);
+  }
+});
