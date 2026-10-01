@@ -110,7 +110,7 @@ function autonomousNpcActions(j: JianghuState, simulation: SimulationState, even
     const plan = createNpcPlan(npc, goal);
 
     // Opportunity: check the current world before committing to an action.
-    const opportunity = evaluateNpcOpportunity(j, npc, plan);
+    const opportunity = evaluateNpcOpportunity(j, npc, plan, simulation.ledger);
     if (!opportunity.available) continue;
 
     // Action + consequence: mutate the cloned Jianghu state and emit a structured event.
