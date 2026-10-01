@@ -43,7 +43,7 @@ function evaluatePrecondition(
 ): ActionContractIssue | undefined {
   const expression = precondition.expression;
 
-  let match = expression.match(/^only if qi\s*(?:>=|at least)\s*(\d+)$/i);
+  let match = expression.match(/^(?:only if\s+)?qi\s*(?:>=|at least)\s*(\d+)$/i);
   if (match) {
     const requiredQi = Number(match[1]);
     if (state.character.qi < requiredQi) {
@@ -55,7 +55,7 @@ function evaluatePrecondition(
     return undefined;
   }
 
-  match = expression.match(/^only if carrying\s+(.+)$/i);
+  match = expression.match(/^(?:only if\s+)?carrying\s+(.+)$/i);
   if (match) {
     const itemId = match[1].trim();
     if (!state.character.inventory.includes(itemId)) {
@@ -67,7 +67,7 @@ function evaluatePrecondition(
     return undefined;
   }
 
-  match = expression.match(/^only if at\s+(.+)$/i);
+  match = expression.match(/^(?:only if\s+)?at\s+(.+)$/i);
   if (match) {
     const locationId = match[1].trim();
     if (state.character.locationId !== locationId) {
