@@ -241,6 +241,13 @@ Narrative text should remain separate from the machine event record.
 - [x] Make investigation agency consume NPC-known rumors rather than global rumor truth.
 - [x] Add regression coverage proving unrelated ledger events remain hidden.
 
+### Phase 5.3 — Memory-aware NPC agency
+
+- [x] Add deterministic NPC memory query helpers.
+- [x] Limit agency memory reads to the NPC's own recorded memories.
+- [x] Allow investigation goals to use remembered leads without granting global knowledge.
+- [x] Add regression coverage for deterministic memory access.
+
 After stabilization, build NPC agency as:
 
 `Goal → Plan → Opportunity → Action → Consequence`
