@@ -26,6 +26,27 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
   if (!state.world.locationIds.includes(c.locationId)) {
     issues.push({ path: 'character.locationId', message: 'Current location must exist in world.locationIds.' });
   }
+  if (!Array.isArray(state.ledger)) {
+    issues.push({ path: 'ledger', message: 'Event ledger must be an array.' });
+  } else {
+    for (const [index, entry] of state.ledger.entries()) {
+      const path = `ledger[${index}]`;
+      if (!entry.eventId.trim()) issues.push({ path: `${path}.eventId`, message: 'Event id must not be empty.' });
+      if (!Number.isInteger(entry.turn) || entry.turn < 0) issues.push({ path: `${path}.turn`, message: 'Event turn must be a non-negative integer.' });
+      if (!entry.actorId.trim()) issues.push({ path: `${path}.actorId`, message: 'Event actor id must not be empty.' });
+      if (!entry.actionDescription.trim()) issues.push({ path: `${path}.actionDescription`, message: 'Event action description must not be empty.' });
+      if (!entry.locationId.trim()) issues.push({ path: `${path}.locationId`, message: 'Event location id must not be empty.' });
+      if (entry.provenance !== 'deterministic-resolver') issues.push({ path: `${path}.provenance`, message: 'Event provenance must be deterministic-resolver.' });
+      for (const [field, values] of Object.entries({
+        targetIds: entry.targetIds, causes: entry.causes, effects: entry.effects,
+        witnesses: entry.witnesses, knowledgeConsequences: entry.knowledgeConsequences, causalLinks: entry.causalLinks,
+      })) {
+        if (!Array.isArray(values) || values.some(value => typeof value !== 'string')) {
+          issues.push({ path: `${path}.${field}`, message: 'Event metadata lists must contain strings.' });
+        }
+      }
+    }
+  }
   if (state.jianghu) {
     if (state.jianghu.schemaVersion !== 1) {
       issues.push({ path: 'jianghu.schemaVersion', message: 'Unsupported Jianghu schema version.' });
