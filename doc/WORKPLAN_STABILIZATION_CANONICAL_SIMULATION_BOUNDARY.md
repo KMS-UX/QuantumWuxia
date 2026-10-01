@@ -192,7 +192,7 @@ Add a first-class machine-readable event record after the boundary is stable.
 - [x] Persist the ledger in canonical simulation state.
 - [x] Validate ledger entries at the simulation boundary.
 - [x] Preserve legacy saves with an empty ledger during migration.
-- [ ] Expand event producers with explicit causes, witnesses, knowledge consequences, and causal links.
+- [x] Expand event producers with explicit causes, witnesses, knowledge consequences, and causal links.
 
 
 Minimum event metadata:
