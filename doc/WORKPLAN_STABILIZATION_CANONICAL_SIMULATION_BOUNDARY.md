@@ -226,6 +226,14 @@ Narrative text should remain separate from the machine event record.
 
 ## 8. Phase 5 — Living Jianghu
 
+### Phase 5.1 — Bounded NPC agency pipeline
+
+- [x] Formalize NPC goal selection as deterministic simulation data.
+- [x] Formalize `Goal → Plan → Opportunity → Action → Consequence`.
+- [x] Preserve the existing bounded three-action NPC tick budget.
+- [x] Emit structured causal events for NPC actions.
+- [x] Add deterministic regression coverage for agency selection and execution.
+
 After stabilization, build NPC agency as:
 
 `Goal → Plan → Opportunity → Action → Consequence`
