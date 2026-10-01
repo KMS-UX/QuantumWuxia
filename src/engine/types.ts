@@ -24,6 +24,8 @@ export interface SimCondition {
   durationTurns?: number;
 }
 
+import type { WuxiaCharacter } from './wuxia';
+
 export interface SimCharacter {
   id: string;
   name: string;
@@ -44,6 +46,8 @@ export interface SimCharacter {
   conditions: SimCondition[];
   inventory: string[];
   locationId: string;
+  /** Wuxia-specific mechanics; optional for legacy save compatibility. */
+  wuxia?: WuxiaCharacter;
 }
 
 export interface SimWorld {
@@ -75,6 +79,8 @@ export interface StateEvent {
     | 'character.hp_changed'
     | 'character.qi_changed'
     | 'character.fatigue_changed'
+    | 'character.injury_added'
+    | 'character.social_changed'
     | 'world.location_changed'
     | 'world.fact_discovered';
   payload: Record<string, string | number | boolean | null>;

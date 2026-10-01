@@ -8,6 +8,8 @@ import { JournalEntry } from '../components/Journal';
 import { database } from '../services/database';
 import { changeTracker } from '../services/changeTracker';
 import { soundManager } from '../services/soundManager';
+import { resolvePlayerAction } from '../engine/actionPipeline';
+import { createSimulationState } from '../engine/simulationAdapter';
 
 interface GameStore {
   // Game state
@@ -69,7 +71,7 @@ const defaultSettings: GameSettings = {
   theme: 'dark',
   fontSize: 'medium',
   narrativeStyle: 'detailed',
-  worldTheme: 'fantasy',
+  worldTheme: 'wuxia',
   soundEnabled: true,
   animationsEnabled: true,
 };
@@ -257,13 +259,19 @@ export const useGameStore = create<GameStore>()(
           };
           
           set({
-            gameState: {
-              ...state,
-              turns: [turn],
-              currentScene: response.narrative,
-              location: response.stateUpdates?.locationChange || state.location,
-              turnCount: 1,
-            },
+            gameState: (() => {
+              const initialState: GameState = {
+                ...state,
+                turns: [turn],
+                currentScene: response.narrative,
+                location: response.stateUpdates?.locationChange || state.location,
+                turnCount: 1,
+              };
+              return {
+                ...initialState,
+                simulation: createSimulationState(initialState, [initialState.location]),
+              };
+            })(),
             isLoading: false,
             activeTab: 'narrative',
           });
@@ -281,17 +289,23 @@ export const useGameStore = create<GameStore>()(
             isLoading: false,
             isDemoMode: true,
             error: `Could not connect to AI. Running in demo mode. Configure your LLM in Settings for full AI narration.`,
-            gameState: {
-              character,
-              isGameStarted: true,
-              turns: [turn],
-              currentScene: response.narrative,
-              location: response.stateUpdates?.locationChange || 'Dungeon Cell',
-              turnCount: 1,
-              questLog: [],
-              relationships: [],
-              isGameOver: false,
-            },
+            gameState: (() => {
+              const initialState: GameState = {
+                character,
+                isGameStarted: true,
+                turns: [turn],
+                currentScene: response.narrative,
+                location: response.stateUpdates?.locationChange || 'Dungeon Cell',
+                turnCount: 1,
+                questLog: [],
+                relationships: [],
+                isGameOver: false,
+              };
+              return {
+                ...initialState,
+                simulation: createSimulationState(initialState, [initialState.location]),
+              };
+            })(),
           });
         }
       },
@@ -300,20 +314,24 @@ export const useGameStore = create<GameStore>()(
         const { gameState, settings, isDemoMode } = get();
         soundManager.choiceConfirm();
         set({ isLoading: true, error: null });
-        
+
         try {
+          const selectedChoice = gameState.turns[gameState.turns.length - 1]?.choices.find(c => c.id === choiceId);
+          const prepared = resolvePlayerAction(gameState, choiceText, selectedChoice?.risk ?? 'medium');
+          const resolvedState = prepared.nextGameState;
+          const resolutionContext = `[Resolved action: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+
           let response: LLMResponse;
-          
           if (isDemoMode) {
             response = getDemoResponse(choiceText);
           } else {
             response = await generateNarrative(
               settings.llmConfig,
-              gameState,
-              `[Chose option ${choiceId}]: ${choiceText}`
+              resolvedState,
+              `[Chose option ${choiceId}]: ${choiceText}\n${resolutionContext}`
             );
           }
-          
+
           const turn: GameTurn = {
             id: uuidv4(),
             narrative: response.narrative,
@@ -321,95 +339,61 @@ export const useGameStore = create<GameStore>()(
             playerAction: choiceText,
             timestamp: Date.now(),
           };
-          
-          const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
-          
-          const newLocation = response.stateUpdates?.locationChange || gameState.location;
-          
+
           const newState: GameState = {
-            ...gameState,
-            character: updatedCharacter,
-            turns: [...gameState.turns, turn],
+            ...resolvedState,
+            turns: [...resolvedState.turns, turn],
             currentScene: response.narrative,
-            location: newLocation,
-            turnCount: gameState.turnCount + 1,
           };
-          
+
           set({
             gameState: newState,
             isLoading: false,
           });
-          
-          // Track state changes in database
+
           try {
             await changeTracker.trackStateChange(gameState, newState, newState.turnCount);
             await changeTracker.trackPlayerAction(choiceText, false, newState.turnCount);
-            await database.logVisitedLocation(changeTracker['gameId'], newLocation, newState.turnCount);
+            await database.logVisitedLocation(changeTracker['gameId'], newState.location, newState.turnCount);
           } catch (error) {
             console.error('Failed to track changes:', error);
           }
-          
-          // Track visited location
-          get().addVisitedLocation(newLocation);
-          
-          // Check for death
-          if (updatedCharacter.stats.currentHp <= 0) {
+
+          get().addVisitedLocation(newState.location);
+          if (newState.character?.stats.currentHp <= 0) {
             get().setDead(true);
           }
-          
-          // Check achievements after turn
           setTimeout(() => get().checkAchievements(), 100);
         } catch (error) {
-          // Fall back to demo
-          const response = getDemoResponse(choiceText);
-          const turn: GameTurn = {
-            id: uuidv4(),
-            narrative: response.narrative,
-            choices: response.choices,
-            playerAction: choiceText,
-            timestamp: Date.now(),
-          };
-          
-          const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
-          
+          console.error('Player choice resolution failed:', error);
           set({
             isLoading: false,
-            isDemoMode: true,
-            gameState: {
-              ...gameState,
-              character: updatedCharacter,
-              turns: [...gameState.turns, turn],
-              currentScene: response.narrative,
-              turnCount: gameState.turnCount + 1,
-            },
+            error: (error as Error).message,
           });
-          
-          // Track visited location and check for death
-          get().addVisitedLocation(gameState.location);
-          if (updatedCharacter.stats.currentHp <= 0) {
-            get().setDead(true);
-          }
         }
       },
-      
+
       useIntent: async (action: string) => {
         const { gameState, settings, isDemoMode } = get();
         soundManager.intentSubmit();
         set({ isLoading: true, error: null });
-        
+
         try {
+          const prepared = resolvePlayerAction(gameState, action, 'medium');
+          const resolvedState = prepared.nextGameState;
+          const resolutionContext = `[Resolved intent: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+
           let response: LLMResponse;
-          
           if (isDemoMode) {
             response = getDemoResponse(action);
           } else {
             response = await generateNarrative(
               settings.llmConfig,
-              gameState,
-              `[Intent]: ${action}`
+              resolvedState,
+              `[Intent]: ${action}\n${resolutionContext}`
             );
           }
-          
+
           const turn: GameTurn = {
             id: uuidv4(),
             narrative: response.narrative,
@@ -418,60 +402,39 @@ export const useGameStore = create<GameStore>()(
             timestamp: Date.now(),
             isIntent: true,
           };
-          
-          const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
-          const newLocation = response.stateUpdates?.locationChange || gameState.location;
-          
+
+          const newState: GameState = {
+            ...resolvedState,
+            turns: [...resolvedState.turns, turn],
+            currentScene: response.narrative,
+          };
+
           set({
-            gameState: {
-              ...gameState,
-              character: updatedCharacter,
-              turns: [...gameState.turns, turn],
-              currentScene: response.narrative,
-              location: newLocation,
-              turnCount: gameState.turnCount + 1,
-            },
+            gameState: newState,
             isLoading: false,
           });
-          
-          // Track visited location and check for death
-          get().addVisitedLocation(newLocation);
-          if (updatedCharacter.stats.currentHp <= 0) {
+
+          try {
+            await changeTracker.trackStateChange(gameState, newState, newState.turnCount);
+            await changeTracker.trackPlayerAction(action, true, newState.turnCount);
+            await database.logVisitedLocation(changeTracker['gameId'], newState.location, newState.turnCount);
+          } catch (error) {
+            console.error('Failed to track changes:', error);
+          }
+
+          get().addVisitedLocation(newState.location);
+          if (newState.character?.stats.currentHp <= 0) {
             get().setDead(true);
           }
         } catch (error) {
-          const response = getDemoResponse(action);
-          const turn: GameTurn = {
-            id: uuidv4(),
-            narrative: response.narrative,
-            choices: response.choices,
-            playerAction: action,
-            timestamp: Date.now(),
-            isIntent: true,
-          };
-          
-          const updatedCharacter = applyStateUpdates(gameState.character!, response.stateUpdates);
-          
+          console.error('Player intent resolution failed:', error);
           set({
             isLoading: false,
-            isDemoMode: true,
-            gameState: {
-              ...gameState,
-              character: updatedCharacter,
-              turns: [...gameState.turns, turn],
-              currentScene: response.narrative,
-              turnCount: gameState.turnCount + 1,
-            },
+            error: (error as Error).message,
           });
-          
-          // Track visited location and check for death
-          get().addVisitedLocation(gameState.location);
-          if (updatedCharacter.stats.currentHp <= 0) {
-            get().setDead(true);
-          }
         }
       },
-      
+
       updateSettings: (newSettings: Partial<GameSettings>) => {
         set({ settings: { ...get().settings, ...newSettings } });
       },
@@ -697,19 +660,30 @@ export const useGameStore = create<GameStore>()(
       revive: () => {
         const { gameState } = get();
         if (gameState.character) {
+          const revivedHp = Math.floor(gameState.character.stats.maxHp / 2);
           const updatedCharacter = {
             ...gameState.character,
             stats: {
               ...gameState.character.stats,
-              currentHp: Math.floor(gameState.character.stats.maxHp / 2),
+              currentHp: revivedHp,
             },
             gold: Math.floor(gameState.character.gold / 2),
           };
+          const simulation = gameState.simulation
+            ? {
+                ...gameState.simulation,
+                character: {
+                  ...gameState.simulation.character,
+                  hp: Math.min(gameState.simulation.character.maxHp, revivedHp),
+                },
+              }
+            : undefined;
           set({
             isDead: false,
             gameState: {
               ...gameState,
               character: updatedCharacter,
+              ...(simulation ? { simulation } : {}),
             },
           });
         }
@@ -730,82 +704,3 @@ export const useGameStore = create<GameStore>()(
   )
 );
 
-function applyStateUpdates(character: Character, updates?: any): Character {
-  if (!updates) return character;
-  
-  let newCharacter = { ...character };
-  newCharacter.stats = { ...character.stats };
-  newCharacter.inventory = [...character.inventory];
-  newCharacter.skills = [...character.skills];
-  
-  if (updates.hpChange) {
-    newCharacter.stats.currentHp = Math.max(0, Math.min(
-      newCharacter.stats.maxHp,
-      newCharacter.stats.currentHp + updates.hpChange
-    ));
-  }
-  
-  if (updates.manaChange) {
-    newCharacter.stats.currentMana = Math.max(0, Math.min(
-      newCharacter.stats.maxMana,
-      newCharacter.stats.currentMana + updates.manaChange
-    ));
-  }
-  
-  if (updates.experienceGained) {
-    newCharacter.experience += updates.experienceGained;
-    const xpNeeded = newCharacter.level * 100;
-    if (newCharacter.experience >= xpNeeded) {
-      newCharacter.level += 1;
-      newCharacter.experience -= xpNeeded;
-      newCharacter.stats.maxHp += 5;
-      newCharacter.stats.currentHp = newCharacter.stats.maxHp;
-      newCharacter.stats.maxMana += 3;
-      newCharacter.stats.currentMana = newCharacter.stats.maxMana;
-    }
-  }
-  
-  if (updates.goldChange) {
-    newCharacter.gold = Math.max(0, newCharacter.gold + updates.goldChange);
-  }
-  
-  if (updates.itemsGained) {
-    updates.itemsGained.forEach((itemName: string) => {
-      const existing = newCharacter.inventory.find(i => i.name === itemName);
-      if (existing) {
-        existing.quantity += 1;
-      } else {
-        newCharacter.inventory.push({
-          id: uuidv4(),
-          name: itemName,
-          type: 'misc',
-          description: `A ${itemName}`,
-          quantity: 1,
-          value: 10,
-        });
-      }
-    });
-  }
-  
-  if (updates.itemsLost) {
-    updates.itemsLost.forEach((itemName: string) => {
-      const idx = newCharacter.inventory.findIndex(i => i.name === itemName);
-      if (idx !== -1) {
-        newCharacter.inventory[idx].quantity -= 1;
-        if (newCharacter.inventory[idx].quantity <= 0) {
-          newCharacter.inventory.splice(idx, 1);
-        }
-      }
-    });
-  }
-  
-  if (updates.skillsGained) {
-    updates.skillsGained.forEach((skill: string) => {
-      if (!newCharacter.skills.includes(skill)) {
-        newCharacter.skills.push(skill);
-      }
-    });
-  }
-  
-  return newCharacter;
-}

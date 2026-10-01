@@ -16,12 +16,16 @@ export interface LLMResponse {
   };
 }
 
-const SYSTEM_PROMPT = `You are a masterful RPG Game Master narrating a text-based adventure. Your role:
+const SYSTEM_PROMPT = `You are the narrative layer of QuantumWuxia, a persistent Wuxia-fantasy RPG simulation. You are not the game engine and you must never invent authoritative state changes. Your role:
 - Describe scenes vividly but concisely (2-4 paragraphs)
 - Present exactly 5 numbered choices for the player, each with a risk level
-- Track the game world state consistently
+- Treat the supplied simulation state and resolution as authoritative
 - Remember previous events and characters
+- Treat Qi as internal energy rather than generic mana
+- Respect martial arts, cultivation, fatigue, injury, reputation, and consequence-driven Wuxia logic
 - Make consequences feel real and meaningful
+- Never decide whether an action succeeds; the simulation resolver has already decided that
+- Never invent items, damage, rewards, travel, relationships, or other state changes
 - Include sensory details and atmosphere
 - Never break character as the narrator
 
@@ -35,16 +39,9 @@ Always respond in valid JSON format with this structure:
     {"id": 4, "text": "Choice text", "risk": "low"},
     {"id": 5, "text": "Choice text", "risk": "medium"}
   ],
-  "stateUpdates": {
-    "itemsGained": [],
-    "itemsLost": [],
-    "skillsGained": [],
-    "hpChange": 0,
-    "manaChange": 0,
-    "experienceGained": 0,
-    "goldChange": 0,
-    "locationChange": null
-  }
+  "stateUpdates": {}
+}
+
 }`;
 
 function buildContextPrompt(state: GameState, playerAction: string): string {
@@ -84,6 +81,25 @@ function buildContextPrompt(state: GameState, playerAction: string): string {
     context += '\n';
   }
   
+  if (state.simulation) {
+    const simulation = state.simulation;
+    context += `### Authoritative Simulation\n`;
+    context += `- Simulation turn: ${simulation.world.turn}\n`;
+    context += `- Current location id: ${simulation.character.locationId}\n`;
+    context += `- HP: ${simulation.character.hp}/${simulation.character.maxHp}\n`;
+    context += `- Qi: ${simulation.character.qi}/${simulation.character.maxQi}\n`;
+    context += `- Fatigue: ${simulation.character.fatigue}/100\n`;
+    context += `- Conditions: ${simulation.character.conditions.map(c => c.id).join(', ') || 'None'}\n`;
+    context += `- Known facts: ${simulation.world.knownFacts.join(', ') || 'None'}\n\n`;    if (simulation.character.wuxia) {
+      const wuxia = simulation.character.wuxia;
+      context += `- Cultivation: ${wuxia.cultivation.stage}, Qi control ${wuxia.cultivation.qiControl}/100, meridian integrity ${wuxia.cultivation.meridianIntegrity}/100\n`;
+      context += `- Martial arts: ${wuxia.martialArts.map(art => `${art.name} (mastery ${art.mastery})`).join(', ') || 'None'}\n`;
+      context += `- Injuries: ${wuxia.injuries.map(injury => `${injury.id} severity ${injury.severity}`).join(', ') || 'None'}\n`;
+      context += `- Social: reputation ${wuxia.social.reputation}, Face ${wuxia.social.face}, trust ${wuxia.social.trust}, fear ${wuxia.social.fear}\n`;
+    }
+
+  }
+
   // Recent history (last 5 turns)
   const recentTurns = turns.slice(-5);
   if (recentTurns.length > 0) {
