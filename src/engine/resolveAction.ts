@@ -116,6 +116,7 @@ export function resolveAction(
       action: normalizedAction,
       state,
       events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
+      ledger: ledgerFor('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
       roll,
       difficulty: DIFFICULTY[normalizedAction.kind],
     };
