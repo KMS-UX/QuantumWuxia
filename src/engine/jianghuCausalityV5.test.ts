@@ -32,6 +32,7 @@ test('de-escalation reduces market scarcity and ends a resolved chain', () => {
 test('knowledge can be deterministically verified', () => {
   const j = createDefaultJianghu();
   j.worldEvents.push({ id: 'e3', kind: 'rumor', title: 'Rumor', description: 'The river is unsafe', factionIds: [], severity: 2, active: true, createdTurn: 5, locationId: 'The Crossroads' });
+  j.rumors.push({ id: 'e3', text: 'The river is unsafe', origin: 'npc-teahouse-keeper', currentLocationId: 'The Crossroads', status: 'false', credibility: 10, knownBy: ['player'], createdTurn: 5, spreadRate: 1 });
   j.knowledgeRecords!.push({ id: 'k1', subjectId: 'player', fact: 'The river is unsafe', sourceId: 'e3', sourceKind: 'rumor', confidence: 50, discoveredTurn: 5, trueState: 'unknown' });
   j.causalChains!.push({ id: 'c3', rootEventId: 'e3', step: 0, kind: 'information', description: 'Rumor', sourceIds: ['e3'], active: true, createdTurn: 5, nextCheckTurn: 5 });
   const result = advanceCausalityV5(j, state());
@@ -43,6 +44,7 @@ test('location reactions expire deterministically', () => {
   j.causalChains!.push({ id: 'c4', rootEventId: 'e4', step: 0, kind: 'personal', description: 'Trouble', sourceIds: ['e4'], active: true, createdTurn: 5, nextCheckTurn: 5 });
   const result = advanceCausalityV5(j, state());
   expect(result.jianghu.locationConditions?.[0].active).toBe(true);
-  const later = advanceCausalityV5(result.jianghu, state(9));
+  const laterInput = { ...result.jianghu, worldEvents: result.jianghu.worldEvents.map(event => ({ ...event, active: false })) };
+  const later = advanceCausalityV5(laterInput, state(9));
   expect(later.jianghu.locationConditions?.length).toBe(0);
 });
