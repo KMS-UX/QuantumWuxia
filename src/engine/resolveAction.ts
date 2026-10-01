@@ -6,7 +6,7 @@ import type {
 } from './types';
 import { validateState } from './validateState';
 import { qiRecovery } from './wuxiaRules';
-import { syncInjuries } from './wuxia';
+import { syncInjuries } from './wuxia';\nimport { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
 
 const DIFFICULTY: Record<ProposedAction['kind'], number> = {
   inspect: 25,

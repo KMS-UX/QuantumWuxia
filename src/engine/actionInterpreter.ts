@@ -14,7 +14,7 @@ function includesAny(text: string, keywords: string[]): boolean {
   return keywords.some(keyword => text.includes(keyword));
 }
 
-function inferDestination(text: string, simulation: SimulationState): string | undefined {
+function inferTarget(text: string, simulation: SimulationState): string | undefined {\n  const npc = simulation.jianghu?.npcs.find(person => text.includes(person.name.toLowerCase()));\n  return npc?.id;\n}\n\nfunction inferDestination(text: string, simulation: SimulationState): string | undefined {
   return simulation.world.locationIds.find(id => text.includes(id.toLowerCase()));
 }
 
@@ -28,12 +28,12 @@ export function interpretPlayerAction(
   const lower = normalized.toLowerCase();
 
   const kind = KEYWORDS.find(([, keywords]) => includesAny(lower, keywords))?.[0] ?? 'other';
-  const destinationId = kind === 'travel' ? inferDestination(lower, simulation) : undefined;
+  const destinationId = kind === 'travel' ? inferDestination(lower, simulation) : undefined;\n  const targetId = ['talk', 'attack', 'inspect', 'stealth'].includes(kind) ? inferTarget(lower, simulation) : undefined;
 
   return {
     kind,
     description: normalized,
     risk,
-    ...(destinationId ? { destinationId } : {}),
+    ...(destinationId ? { destinationId } : {}),\n    ...(targetId ? { targetId } : {}),
   };
 }

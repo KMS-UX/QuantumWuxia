@@ -2,8 +2,9 @@ import type { GameState } from '../types/game';
 import type { SimulationState } from './types';
 import { validateState } from './validateState';
 import { createDefaultWuxiaCharacter } from './wuxia';
+import { createDefaultJianghu } from './jianghu';
 
-/** Transitional bridge from the legacy UI/save model to Simulation Core v1. */
+/** Transitional bridge from the legacy UI/save model to the authoritative simulation state. */
 export function createSimulationState(gameState: GameState, knownLocationIds: string[] = []): SimulationState {
   if (!gameState.character) throw new Error('Cannot create a simulation state without a character.');
 
@@ -11,9 +12,13 @@ export function createSimulationState(gameState: GameState, knownLocationIds: st
   const locationIds = Array.from(new Set([locationId, ...knownLocationIds.filter(Boolean)]));
   const character = gameState.character;
   const maxQi = Math.max(0, character.stats.maxMana);
+  const legacyWuxia = gameState.simulation?.character.wuxia;
 
   return {
     schemaVersion: 1,
+    jianghu: gameState.simulation?.jianghu
+      ? JSON.parse(JSON.stringify(gameState.simulation.jianghu))
+      : createDefaultJianghu(locationId),
     character: {
       id: character.id,
       name: character.name,
@@ -25,7 +30,6 @@ export function createSimulationState(gameState: GameState, knownLocationIds: st
       attributes: {
         strength: character.stats.strength,
         agility: character.stats.agility,
-        // Explicit migration defaults for attributes absent from legacy saves.
         constitution: character.stats.strength,
         perception: character.stats.agility,
         intelligence: character.stats.intelligence,
@@ -35,8 +39,8 @@ export function createSimulationState(gameState: GameState, knownLocationIds: st
       conditions: gameState.simulation?.character.conditions.map(condition => ({ ...condition })) ?? [],
       inventory: character.inventory.flatMap(item => Array(Math.max(0, item.quantity)).fill(item.id)),
       locationId,
-      wuxia: gameState.simulation?.character.wuxia
-        ? gameState.simulation.character.wuxia
+      wuxia: legacyWuxia
+        ? JSON.parse(JSON.stringify(legacyWuxia))
         : createDefaultWuxiaCharacter({
             id: character.id,
             name: character.name,
@@ -67,8 +71,39 @@ export function createSimulationState(gameState: GameState, knownLocationIds: st
   };
 }
 
+function cloneSimulation(simulation: SimulationState): SimulationState {
+  return {
+    schemaVersion: 1,
+    jianghu: simulation.jianghu ? JSON.parse(JSON.stringify(simulation.jianghu)) : undefined,
+    character: {
+      ...simulation.character,
+      attributes: { ...simulation.character.attributes },
+      conditions: simulation.character.conditions.map(condition => ({ ...condition })),
+      inventory: [...simulation.character.inventory],
+      ...(simulation.character.wuxia ? {
+        wuxia: {
+          ...simulation.character.wuxia,
+          cultivation: { ...simulation.character.wuxia.cultivation },
+          martialArts: simulation.character.wuxia.martialArts.map(art => ({
+            ...art,
+            techniques: art.techniques.map(technique => ({ ...technique })),
+          })),
+          injuries: simulation.character.wuxia.injuries.map(injury => ({ ...injury })),
+          social: { ...simulation.character.wuxia.social },
+        },
+      } : {}),
+    },
+    world: {
+      ...simulation.world,
+      locationIds: [...simulation.world.locationIds],
+      knownFacts: [...simulation.world.knownFacts],
+    },
+  };
+}
+
 export function mergeSimulationState(gameState: GameState, simulation: SimulationState): GameState {
   if (!gameState.character) return gameState;
+  const cloned = cloneSimulation(simulation);
 
   return {
     ...gameState,
@@ -76,82 +111,49 @@ export function mergeSimulationState(gameState: GameState, simulation: Simulatio
       ...gameState.character,
       stats: {
         ...gameState.character.stats,
-        currentHp: simulation.character.hp,
-        currentMana: simulation.character.qi,
-        maxMana: simulation.character.maxQi,
+        currentHp: cloned.character.hp,
+        currentMana: cloned.character.qi,
+        maxMana: cloned.character.maxQi,
       },
     },
-    location: simulation.character.locationId,
-    turnCount: simulation.world.turn,
-    simulation: {
-      schemaVersion: 1,
-      character: {
-        ...simulation.character,
-        attributes: { ...simulation.character.attributes },
-        conditions: simulation.character.conditions.map(condition => ({ ...condition })),
-        inventory: [...simulation.character.inventory],
-        ...(simulation.character.wuxia ? {
-          wuxia: {
-            ...simulation.character.wuxia,
-            cultivation: { ...simulation.character.wuxia.cultivation },
-            martialArts: simulation.character.wuxia.martialArts.map(art => ({ ...art, techniques: art.techniques.map(technique => ({ ...technique })) })),
-            injuries: simulation.character.wuxia.injuries.map(injury => ({ ...injury })),
-            social: { ...simulation.character.wuxia.social },
-          },
-        } : {}),
-      },
-      world: {
-        ...simulation.world,
-        locationIds: [...simulation.world.locationIds],
-        knownFacts: [...simulation.world.knownFacts],
-      },
-    },
+    location: cloned.character.locationId,
+    turnCount: cloned.world.turn,
+    simulation: cloned,
   };
 }
 
 export function ensureSimulationState(gameState: GameState, knownLocationIds: string[] = []): SimulationState {
   if (gameState.simulation && validateState(gameState.simulation).length === 0) {
-    return {
-      schemaVersion: 1,
-      character: {
-        ...gameState.simulation.character,
-        attributes: { ...gameState.simulation.character.attributes },
-        conditions: gameState.simulation.character.conditions.map(condition => ({ ...condition })),
-        inventory: [...gameState.simulation.character.inventory],
-        ...(gameState.simulation.character.wuxia ? {
-          wuxia: {
-            ...gameState.simulation.character.wuxia,
-            cultivation: { ...gameState.simulation.character.wuxia.cultivation },
-            martialArts: gameState.simulation.character.wuxia.martialArts.map(art => ({
-              ...art,
-              techniques: art.techniques.map(technique => ({ ...technique })),
-            })),
-            injuries: gameState.simulation.character.wuxia.injuries.map(injury => ({ ...injury })),
-            social: { ...gameState.simulation.character.wuxia.social },
-          },
-        } : {}),
-      },
-      world: {
-        ...gameState.simulation.world,
-        locationIds: Array.from(new Set([
-          ...gameState.simulation.world.locationIds,
-          ...knownLocationIds.filter(Boolean),
-        ])),
-        knownFacts: [...gameState.simulation.world.knownFacts],
-      },
-    };
+    const simulation = cloneSimulation(gameState.simulation);
+    simulation.world.locationIds = Array.from(new Set([
+      ...simulation.world.locationIds,
+      ...knownLocationIds.filter(Boolean),
+    ]));
+    return simulation;
   }
   return createSimulationState(gameState, knownLocationIds);
 }
 
 export function simulationStateToPromptContext(simulation: SimulationState): string {
   const c = simulation.character;
+  const jianghu = simulation.jianghu;
+  const nearbyNpcs = jianghu?.npcs
+    .filter(npc => npc.alive && npc.locationId === c.locationId)
+    .map(npc => npc.name)
+    .join(', ') || 'none';
+  const activeRumors = jianghu?.rumors
+    .filter(rumor => rumor.currentLocationId === c.locationId)
+    .map(rumor => rumor.text)
+    .join(' | ') || 'none';
+
   return [
     `Simulation turn: ${simulation.world.turn}`,
     `Location: ${c.locationId}`,
     `HP: ${c.hp}/${c.maxHp}`,
     `Qi: ${c.qi}/${c.maxQi}`,
     `Fatigue: ${c.fatigue}/100`,
+    `Nearby known people: ${nearbyNpcs}`,
+    `Local rumors: ${activeRumors}`,
     `Known facts: ${simulation.world.knownFacts.join(', ') || 'none'}`,
   ].join('\n');
 }
