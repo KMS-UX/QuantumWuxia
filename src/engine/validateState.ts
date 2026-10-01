@@ -31,5 +31,39 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
       issues.push({ path: `character.attributes.${key}`, message: 'Attribute must be a finite non-negative number.' });
     }
   }
+
+  if (c.wuxia) {
+    const cultivation = c.wuxia.cultivation;
+    if (!Number.isFinite(cultivation.qiControl) || cultivation.qiControl < 0 || cultivation.qiControl > 100) {
+      issues.push({ path: 'character.wuxia.cultivation.qiControl', message: 'Qi control must be within 0..100.' });
+    }
+    if (!Number.isFinite(cultivation.meridianIntegrity) || cultivation.meridianIntegrity < 0 || cultivation.meridianIntegrity > 100) {
+      issues.push({ path: 'character.wuxia.cultivation.meridianIntegrity', message: 'Meridian integrity must be within 0..100.' });
+    }
+    if (!Number.isFinite(cultivation.bottleneck) || cultivation.bottleneck < 0 || cultivation.bottleneck > 100) {
+      issues.push({ path: 'character.wuxia.cultivation.bottleneck', message: 'Cultivation bottleneck must be within 0..100.' });
+    }
+    const social = c.wuxia.social;
+    if (!Number.isFinite(social.reputation) || social.reputation < -100 || social.reputation > 100) {
+      issues.push({ path: 'character.wuxia.social.reputation', message: 'Reputation must be within -100..100.' });
+    }
+    if (!Number.isFinite(social.face) || social.face < 0 || social.face > 100) {
+      issues.push({ path: 'character.wuxia.social.face', message: 'Face must be within 0..100.' });
+    }
+    if (!Number.isFinite(social.trust) || social.trust < -100 || social.trust > 100) {
+      issues.push({ path: 'character.wuxia.social.trust', message: 'Trust must be within -100..100.' });
+    }
+    if (!Number.isFinite(social.fear) || social.fear < 0 || social.fear > 100) {
+      issues.push({ path: 'character.wuxia.social.fear', message: 'Fear must be within 0..100.' });
+    }
+    for (const [index, injury] of c.wuxia.injuries.entries()) {
+      if (injury.severity < 1 || injury.severity > 5) {
+        issues.push({ path: `character.wuxia.injuries[${index}].severity`, message: 'Injury severity must be 1..5.' });
+      }
+      if (injury.healingTurns < 0) {
+        issues.push({ path: `character.wuxia.injuries[${index}].healingTurns`, message: 'Healing turns cannot be negative.' });
+      }
+    }
+  }
   return issues;
 }
