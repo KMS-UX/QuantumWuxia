@@ -1,7 +1,7 @@
 import type { GameState } from '../types/game';
 import type { SimulationState } from './types';
 import { validateState } from './validateState';
-import { createDefaultWuxiaCharacter } from './wuxia';
+import { createDefaultWuxiaCharacter } from './wuxia';\nimport { createDefaultJianghu } from './jianghu';
 
 /** Transitional bridge from the legacy UI/save model to Simulation Core v1. */
 export function createSimulationState(gameState: GameState, knownLocationIds: string[] = []): SimulationState {
