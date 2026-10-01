@@ -83,7 +83,7 @@ export function resolveAction(
       knownRumorIds: [...(input.world.knownRumorIds ?? [])],
       knownNpcIds: [...(input.world.knownNpcIds ?? [])],
     },
-    jianghu: input.jianghu ? JSON.parse(JSON.stringify(input.jianghu)) : createDefaultJianghu(c.locationId),
+    jianghu: input.jianghu ? JSON.parse(JSON.stringify(input.jianghu)) : createDefaultJianghu(input.character.locationId),
   };
   const events: StateEvent[] = [];
   const c = state.character;
