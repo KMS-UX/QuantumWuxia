@@ -11,6 +11,7 @@ import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu
 import { applyCausalityV3 } from './jianghuCausalityV3';
 import { processInformation, advanceCausalChains } from './jianghuInformationV4';
 import { advanceCausalityV5 } from './jianghuCausalityV5';
+import { normalizeProposedAction, validateProposedAction } from './actionContract';
 
 const DIFFICULTY: Record<ProposedAction['kind'], number> = {
   inspect: 25,
@@ -40,7 +41,7 @@ function clamp(value: number, min: number, max: number): number {
  */
 export function resolveAction(
   input: SimulationState,
-  action: ProposedAction,
+  proposedAction: ProposedAction,
   roll: number,
 ): ActionResolution {
   const issues = validateState(input);
@@ -50,12 +51,11 @@ export function resolveAction(
   if (!Number.isInteger(roll) || roll < 0 || roll > 99) {
     throw new RangeError('roll must be an integer between 0 and 99.');
   }
-  if (!action.description.trim()) throw new Error('Action description must not be empty.');
-  if (action.qiCost !== undefined && (!Number.isFinite(action.qiCost) || action.qiCost < 0)) {
-    throw new Error('qiCost must be a finite non-negative number.');
-  }
-  if (action.timeCost !== undefined && (!Number.isFinite(action.timeCost) || action.timeCost < 0)) {
-    throw new Error('timeCost must be a finite non-negative number.');
+
+  const normalizedAction = normalizeProposedAction(input, proposedAction);
+  const actionIssues = validateProposedAction(input, normalizedAction);
+  if (actionIssues.length > 0) {
+    throw new Error(`Invalid proposed action: ${actionIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
   }
 
   const state: SimulationState = {
@@ -89,17 +89,17 @@ export function resolveAction(
   };
   const events: StateEvent[] = [];
   const c = state.character;
-  const qiCost = action.qiCost ?? (action.kind === 'attack' ? 0 : action.kind === 'meditate' ? 0 : 0);
-  const timeCost = action.timeCost ?? (action.kind === 'rest' ? 2 : action.kind === 'travel' ? 2 : 1);
+  const qiCost = normalizedAction.qiCost ?? (normalizedAction.kind === 'attack' ? 0 : normalizedAction.kind === 'meditate' ? 0 : 0);
+  const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' ? 2 : normalizedAction.kind === 'travel' ? 2 : 1);
 
-  if (action.kind === 'travel') {
-    if (!action.destinationId || !state.world.locationIds.includes(action.destinationId)) {
+  if (normalizedAction.kind === 'travel') {
+    if (!normalizedAction.destinationId || !state.world.locationIds.includes(normalizedAction.destinationId)) {
       return {
         status: 'blocked',
         summary: 'The destination is unknown or unreachable from the current world map.',
-        action,
+        action: normalizedAction,
         state,
-        events: [{ type: 'action.resolved', payload: { kind: action.kind, status: 'blocked' } }],
+        events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
         roll,
         difficulty: DIFFICULTY.travel,
       };
@@ -109,26 +109,26 @@ export function resolveAction(
     return {
       status: 'blocked',
       summary: 'There is not enough Qi to attempt this action safely.',
-      action,
+      action: normalizedAction,
       state,
-      events: [{ type: 'action.resolved', payload: { kind: action.kind, status: 'blocked' } }],
+      events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
       roll,
-      difficulty: DIFFICULTY[action.kind],
+      difficulty: DIFFICULTY[normalizedAction.kind],
     };
   }
 
-  const difficulty = clamp(DIFFICULTY[action.kind] + RISK_MODIFIER[action.risk] - Math.floor(c.attributes.luck / 5), 5, 95);
+  const difficulty = clamp(DIFFICULTY[normalizedAction.kind] + RISK_MODIFIER[normalizedAction.riskPosture ?? normalizedAction.risk] - Math.floor(c.attributes.luck / 5), 5, 95);
   const score = roll + Math.floor((c.attributes.perception + c.attributes.agility) / 4);
   let status: ActionResolution['status'];
 
-  if (action.kind === 'rest') {
+  if (normalizedAction.kind === 'rest') {
     status = 'success';
     c.fatigue = clamp(c.fatigue - 25, 0, 100);
     const restoredHp = Math.min(c.maxHp - c.hp, Math.max(1, Math.floor(c.maxHp * 0.05)));
     c.hp += restoredHp;
     events.push({ type: 'character.hp_changed', payload: { amount: restoredHp, reason: 'rest' } });
     events.push({ type: 'character.fatigue_changed', payload: { value: c.fatigue } });
-  } else if (action.kind === 'meditate') {
+  } else if (normalizedAction.kind === 'meditate') {
     status = 'success';
     const restoredQi = Math.min(
       c.maxQi - c.qi,
@@ -150,7 +150,7 @@ export function resolveAction(
     status = 'failure';
   }
 
-  if (status === 'failure' && action.kind === 'attack' && action.risk === 'high' && c.wuxia) {
+  if (status === 'failure' && normalizedAction.kind === 'attack' && normalizedAction.risk === 'high' && c.wuxia) {
     const injury = {
       id: `backlash-${state.world.turn + 1}`,
       severity: 1,
@@ -165,7 +165,7 @@ export function resolveAction(
     });
   }
 
-  if (status === 'success' && action.kind === 'talk' && c.wuxia) {
+  if (status === 'success' && normalizedAction.kind === 'talk' && c.wuxia) {
     c.wuxia.social.trust = clamp(c.wuxia.social.trust + 1, -100, 100);
     c.wuxia.social.face = clamp(c.wuxia.social.face + 1, 0, 100);
     events.push({
@@ -174,22 +174,22 @@ export function resolveAction(
     });
   }
 
-  if (action.kind !== 'rest' && action.kind !== 'meditate') {
+  if (normalizedAction.kind !== 'rest' && normalizedAction.kind !== 'meditate') {
     c.qi -= qiCost;
-    if (qiCost > 0) events.push({ type: 'character.qi_changed', payload: { amount: -qiCost, reason: action.kind } });
-    if (status === 'success' && action.kind === 'travel' && action.destinationId) {
+    if (qiCost > 0) events.push({ type: 'character.qi_changed', payload: { amount: -qiCost, reason: normalizedAction.kind } });
+    if (status === 'success' && normalizedAction.kind === 'travel' && normalizedAction.destinationId) {
       const from = c.locationId;
-      c.locationId = action.destinationId;
+      c.locationId = normalizedAction.destinationId;
       events.push({ type: 'world.location_changed', payload: { from, to: c.locationId } });
     }
-    if (status === 'success' && action.kind === 'inspect' && action.targetId) {
-      const fact = `inspected:${action.targetId}`;
+    if (status === 'success' && normalizedAction.kind === 'inspect' && normalizedAction.targetId) {
+      const fact = `inspected:${normalizedAction.targetId}`;
       if (!state.world.knownFacts.includes(fact)) {
         state.world.knownFacts.push(fact);
         events.push({ type: 'world.fact_discovered', payload: { fact } });
       }
     }
-    c.fatigue = clamp(c.fatigue + Math.ceil(timeCost * (action.risk === 'high' ? 8 : 4)), 0, 100);
+    c.fatigue = clamp(c.fatigue + Math.ceil(timeCost * (normalizedAction.risk === 'high' ? 8 : 4)), 0, 100);
     events.push({ type: 'character.fatigue_changed', payload: { value: c.fatigue } });
   }
 
@@ -202,7 +202,7 @@ export function resolveAction(
   }
 
   if (state.jianghu) {
-    const interaction = applyJianghuAction(state.jianghu, state, action);
+    const interaction = applyJianghuAction(state.jianghu, state, normalizedAction);
     state.jianghu = interaction.jianghu;
     events.push(...interaction.events);
   }
@@ -221,7 +221,7 @@ export function resolveAction(
 
   events.push({
     type: 'action.resolved',
-    payload: { kind: action.kind, status, difficulty, roll, score, turn: state.world.turn },
+    payload: { kind: normalizedAction.kind, status, difficulty, roll, score, turn: state.world.turn },
   });
 
   const summaries: Record<ActionResolution['status'], string> = {
@@ -236,5 +236,5 @@ export function resolveAction(
     throw new Error(`Resolver produced invalid state: ${finalIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
   }
 
-  return { status, summary: summaries[status], action, state, events, roll, difficulty };
+  return { status, summary: summaries[status], action: normalizedAction, state, events, roll, difficulty };
 }
