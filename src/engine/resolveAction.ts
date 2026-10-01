@@ -12,6 +12,7 @@ import { applyCausalityV3 } from './jianghuCausalityV3';
 import { processInformation, advanceCausalChains } from './jianghuInformationV4';
 import { advanceCausalityV5 } from './jianghuCausalityV5';
 import { normalizeProposedAction, validateProposedAction } from './actionContract';
+import { createEventLedger } from './eventLedger';
 
 const DIFFICULTY: Record<ProposedAction['kind'], number> = {
   inspect: 25,
@@ -88,6 +89,8 @@ export function resolveAction(
     jianghu: input.jianghu ? JSON.parse(JSON.stringify(input.jianghu)) : createDefaultJianghu(input.character.locationId),
   };
   const events: StateEvent[] = [];
+  const ledgerFor = (status: ActionResolution['status'], resolutionEvents: StateEvent[] = events) =>
+    createEventLedger(state, normalizedAction, resolutionEvents, { status, roll, difficulty: DIFFICULTY[normalizedAction.kind] });
   const c = state.character;
   const qiCost = normalizedAction.qiCost ?? (normalizedAction.kind === 'attack' ? 0 : normalizedAction.kind === 'meditate' ? 0 : 0);
   const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' ? 2 : normalizedAction.kind === 'travel' ? 2 : 1);
@@ -100,6 +103,7 @@ export function resolveAction(
         action: normalizedAction,
         state,
         events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
+        ledger: ledgerFor('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
         roll,
         difficulty: DIFFICULTY.travel,
       };
@@ -236,5 +240,14 @@ export function resolveAction(
     throw new Error(`Resolver produced invalid state: ${finalIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
   }
 
-  return { status, summary: summaries[status], action: normalizedAction, state, events, roll, difficulty };
+  return {
+    status,
+    summary: summaries[status],
+    action: normalizedAction,
+    state,
+    events,
+    ledger: ledgerFor(status),
+    roll,
+    difficulty,
+  };
 }
