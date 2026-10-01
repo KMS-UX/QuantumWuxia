@@ -77,6 +77,8 @@ export function interpretPlayerAction(
   const approach = inferApproach(lower);
   const techniqueId = kind === 'attack' || kind === 'meditate' ? inferTechnique(lower) : undefined;
   const intendedGoal = inferGoal(normalized);
+  const conditionalClauses = inferConditionalClauses(lower);
+  const declaredConstraints = inferDeclaredConstraints(lower);
 
   return {
     kind,
@@ -89,7 +91,7 @@ export function interpretPlayerAction(
     ...(approach ? { approach } : {}),
     ...(techniqueId ? { techniqueId } : {}),
     ...(intendedGoal ? { intendedGoal } : {}),
-    ...(inferConditionalClauses(lower) ? { conditionalClauses: inferConditionalClauses(lower) } : {}),
-    ...(inferDeclaredConstraints(lower) ? { declaredConstraints: inferDeclaredConstraints(lower) } : {}),
+    ...(conditionalClauses ? { conditionalClauses } : {}),
+    ...(declaredConstraints ? { declaredConstraints } : {}),
   };
 }
