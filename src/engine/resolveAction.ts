@@ -153,8 +153,8 @@ export function resolveAction(
     c.fatigue = clamp(c.fatigue - 25, 0, 100);
     const restoredHp = Math.min(c.maxHp - c.hp, Math.max(1, Math.floor(c.maxHp * 0.05)));
     c.hp += restoredHp;
-    events.push({ type: 'character.hp_changed', payload: { amount: restoredHp, reason: 'rest' } });
-    events.push({ type: 'character.fatigue_changed', payload: { value: c.fatigue } });
+    events.push({ type: 'character.hp_changed', causes: ['action:rest'], payload: { amount: restoredHp, reason: 'rest' } });
+    events.push({ type: 'character.fatigue_changed', causes: ['action:rest'], payload: { value: c.fatigue } });
   } else if (normalizedAction.kind === 'meditate') {
     status = 'success';
     const restoredQi = Math.min(
@@ -167,7 +167,7 @@ export function resolveAction(
       c.wuxia.cultivation.qiControl = clamp(c.wuxia.cultivation.qiControl + 1, 0, 100);
     }
     c.fatigue = clamp(c.fatigue + 5, 0, 100);
-    events.push({ type: 'character.qi_changed', payload: { amount: restoredQi, reason: 'meditation' } });
+    events.push({ type: 'character.qi_changed', causes: ['action:meditate'], knowledgeConsequences: ['player:qi-recovered'], payload: { amount: restoredQi, reason: 'meditation' } });
     events.push({ type: 'character.fatigue_changed', payload: { value: c.fatigue } });
   } else if (score >= difficulty + 20) {
     status = 'success';
@@ -188,6 +188,7 @@ export function resolveAction(
     c.wuxia.injuries.push(injury);
     events.push({
       type: 'character.injury_added',
+      causes: ['action:attack', 'resolution:failure', 'risk:high'],
       payload: { id: injury.id, severity: injury.severity, bodyRegion: injury.bodyRegion },
     });
   }
@@ -197,23 +198,25 @@ export function resolveAction(
     c.wuxia.social.face = clamp(c.wuxia.social.face + 1, 0, 100);
     events.push({
       type: 'character.social_changed',
+      causes: ['action:talk', 'resolution:success'],
+      witnesses: [normalizedAction.targetId ?? c.id],
       payload: { trust: c.wuxia.social.trust, face: c.wuxia.social.face },
     });
   }
 
   if (normalizedAction.kind !== 'rest' && normalizedAction.kind !== 'meditate') {
     c.qi -= qiCost;
-    if (qiCost > 0) events.push({ type: 'character.qi_changed', payload: { amount: -qiCost, reason: normalizedAction.kind } });
+    if (qiCost > 0) events.push({ type: 'character.qi_changed', causes: [`action:${normalizedAction.kind}`, 'resource:qi'], payload: { amount: -qiCost, reason: normalizedAction.kind } });
     if (status === 'success' && normalizedAction.kind === 'travel' && normalizedAction.destinationId) {
       const from = c.locationId;
       c.locationId = normalizedAction.destinationId;
-      events.push({ type: 'world.location_changed', payload: { from, to: c.locationId } });
+      events.push({ type: 'world.location_changed', causes: ['action:travel', `location:${from}`], witnesses: [c.id], payload: { from, to: c.locationId } });
     }
     if (status === 'success' && normalizedAction.kind === 'inspect' && normalizedAction.targetId) {
       const fact = `inspected:${normalizedAction.targetId}`;
       if (!state.world.knownFacts.includes(fact)) {
         state.world.knownFacts.push(fact);
-        events.push({ type: 'world.fact_discovered', payload: { fact } });
+        events.push({ type: 'world.fact_discovered', causes: ['action:inspect', `target:${normalizedAction.targetId}`], witnesses: [c.id], knowledgeConsequences: [`player:fact:${fact}`], payload: { fact } });
       }
     }
     c.fatigue = clamp(c.fatigue + Math.ceil(timeCost * (normalizedAction.risk === 'high' ? 8 : 4)), 0, 100);
@@ -248,6 +251,9 @@ export function resolveAction(
 
   events.push({
     type: 'action.resolved',
+    causes: [`action:${normalizedAction.kind}`, `resolution:${status}`],
+    witnesses: [c.id],
+    causalLinks: state.ledger.slice(-3).map(entry => entry.eventId),
     payload: { kind: normalizedAction.kind, status, difficulty, roll, score, turn: state.world.turn },
   });
 
