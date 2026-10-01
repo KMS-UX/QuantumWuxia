@@ -19,6 +19,7 @@ function cloneSimulation(simulation: SimulationState): SimulationState {
   return {
     schemaVersion: 1,
     jianghu: simulation.jianghu ? JSON.parse(JSON.stringify(simulation.jianghu)) : undefined,
+    ledger: simulation.ledger.map(entry => ({ ...entry, targetIds: [...entry.targetIds], causes: [...entry.causes], effects: [...entry.effects], witnesses: [...entry.witnesses], knowledgeConsequences: [...entry.knowledgeConsequences], causalLinks: [...entry.causalLinks], payload: { ...entry.payload } })),
     character: {
       ...simulation.character,
       attributes: { ...simulation.character.attributes },
