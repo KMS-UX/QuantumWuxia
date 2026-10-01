@@ -85,6 +85,5 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
         issues.push({ path: `character.wuxia.injuries[${index}].healingTurns`, message: 'Healing turns cannot be negative.' });
       }
     }
-  }
   return issues;
 }
