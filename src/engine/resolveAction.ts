@@ -61,6 +61,18 @@ export function resolveAction(
       attributes: { ...input.character.attributes },
       conditions: input.character.conditions.map(condition => ({ ...condition })),
       inventory: [...input.character.inventory],
+      ...(input.character.wuxia ? {
+        wuxia: {
+          ...input.character.wuxia,
+          cultivation: { ...input.character.wuxia.cultivation },
+          martialArts: input.character.wuxia.martialArts.map(art => ({
+            ...art,
+            techniques: art.techniques.map(technique => ({ ...technique })),
+          })),
+          injuries: input.character.wuxia.injuries.map(injury => ({ ...injury })),
+          social: { ...input.character.wuxia.social },
+        },
+      } : {}),
     },
     world: {
       ...input.world,
