@@ -174,7 +174,7 @@ export function resolveAction(
     });
   }
 
-  if (status !== 'blocked' && action.kind !== 'rest' && action.kind !== 'meditate') {
+  if (action.kind !== 'rest' && action.kind !== 'meditate') {
     c.qi -= qiCost;
     if (qiCost > 0) events.push({ type: 'character.qi_changed', payload: { amount: -qiCost, reason: action.kind } });
     if (status === 'success' && action.kind === 'travel' && action.destinationId) {
