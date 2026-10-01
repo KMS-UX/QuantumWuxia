@@ -83,7 +83,7 @@ export interface StateEvent {
     | 'character.injury_added'
     | 'character.social_changed'
     | 'world.location_changed'
-    | 'world.fact_discovered'\n    | 'world.relationship_changed'\n    | 'world.npc_memory_added'\n    | 'world.jianghu_ticked';
+    | 'world.fact_discovered'\n    | 'world.relationship_changed'\n    | 'world.npc_memory_added'\n    | 'world.jianghu_ticked'\n    | 'world.rumor_spread'\n    | 'world.npc_goal_completed';
   payload: Record<string, string | number | boolean | null>;
 }
 
