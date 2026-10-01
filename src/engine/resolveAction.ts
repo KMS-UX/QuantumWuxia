@@ -55,7 +55,7 @@ export function resolveAction(
   const normalizedAction = normalizeProposedAction(input, proposedAction);
   const actionIssues = validateProposedAction(input, normalizedAction);
   if (actionIssues.length > 0) {
-    throw new Error(`Invalid proposed normalizedAction: ${actionIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
+    throw new Error(`Invalid proposed action: ${actionIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
   }
 
   const state: SimulationState = {
@@ -97,9 +97,9 @@ export function resolveAction(
       return {
         status: 'blocked',
         summary: 'The destination is unknown or unreachable from the current world map.',
-        normalizedAction,
+        action,
         state,
-        events: [{ type: 'normalizedAction.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
+        events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
         roll,
         difficulty: DIFFICULTY.travel,
       };
@@ -108,10 +108,10 @@ export function resolveAction(
   if (qiCost > c.qi) {
     return {
       status: 'blocked',
-      summary: 'There is not enough Qi to attempt this normalizedAction safely.',
-      normalizedAction,
+      summary: 'There is not enough Qi to attempt this action safely.',
+      action,
       state,
-      events: [{ type: 'normalizedAction.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
+      events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
       roll,
       difficulty: DIFFICULTY[normalizedAction.kind],
     };
@@ -220,7 +220,7 @@ export function resolveAction(
   }
 
   events.push({
-    type: 'normalizedAction.resolved',
+    type: 'action.resolved',
     payload: { kind: normalizedAction.kind, status, difficulty, roll, score, turn: state.world.turn },
   });
 
