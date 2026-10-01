@@ -54,13 +54,18 @@ export interface SimCharacter {
 export interface SimWorld {
   turn: number;
   locationIds: string[];
-  knownFacts: string[];\n  /** Player-known information only; world truth remains in jianghu. */\n  knownRumorIds?: string[];\n  knownNpcIds?: string[];
+  knownFacts: string[];
+  /** Player-known information only; world truth remains in jianghu. */
+  knownRumorIds?: string[];
+  knownNpcIds?: string[];
 }
 
 export interface SimulationState {
   schemaVersion: 1;
   character: SimCharacter;
   world: SimWorld;
+  /** Persistent world truth; never authored by the LLM. */
+  jianghu?: JianghuState;
 }
 
 export interface ProposedAction {
@@ -83,7 +88,16 @@ export interface StateEvent {
     | 'character.injury_added'
     | 'character.social_changed'
     | 'world.location_changed'
-    | 'world.fact_discovered'\n    | 'world.relationship_changed'\n    | 'world.npc_memory_added'\n    | 'world.jianghu_ticked'\n    | 'world.rumor_spread'\n    | 'world.npc_goal_completed';
+    | 'world.fact_discovered'
+    | 'world.relationship_changed'
+    | 'world.npc_memory_added'
+    | 'world.jianghu_ticked'
+    | 'world.rumor_spread'
+    | 'world.npc_goal_completed'
+    | 'world.obligation_changed'
+    | 'world.faction_conflict'
+    | 'world.market_changed'
+    | 'world.npc_action';
   payload: Record<string, string | number | boolean | null>;
 }
 
