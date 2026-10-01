@@ -115,12 +115,15 @@ export interface StateEvent {
   payload: Record<string, string | number | boolean | null>;
 }
 
+import type { EventLedgerEntry } from './eventLedger';
+
 export interface ActionResolution {
   status: ResolutionStatus;
   summary: string;
   action: ProposedAction;
   state: SimulationState;
   events: StateEvent[];
+  ledger: EventLedgerEntry[];
   roll: number;
   difficulty: number;
 }
