@@ -5,6 +5,7 @@ import type { SimulationState } from './types';
 function state(): SimulationState {
   return {
     schemaVersion: 1,
+    ledger: [],
     character: {
       id: 'player', name: 'Tester', hp: 100, maxHp: 100, qi: 50, maxQi: 50, fatigue: 0,
       attributes: { strength: 10, agility: 10, constitution: 10, perception: 10, intelligence: 10, charisma: 10, luck: 10 },
