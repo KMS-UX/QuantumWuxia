@@ -30,6 +30,7 @@ const baseCharacter = createDefaultWuxiaCharacter({
 
 const state: SimulationState = {
   schemaVersion: 1,
+  ledger: [],
   character: baseCharacter,
   world: {
     turn: 0,

@@ -18,6 +18,7 @@ function fixture(): SimulationState {
   };
   return {
     schemaVersion: 1,
+    ledger: [],
     character: { ...base, wuxia: createDefaultWuxiaCharacter(base).wuxia },
     world: { turn: 3, locationIds: ['The Crossroads'], knownFacts: [], knownRumorIds: [], knownNpcIds: [] },
   };

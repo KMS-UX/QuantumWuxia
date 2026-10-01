@@ -59,6 +59,7 @@ export function migrateLegacyGameState(
 
   return {
     schemaVersion: 1,
+    ledger: [],
     jianghu: createDefaultJianghu(locationId),
     character: {
       ...simulationCharacter,

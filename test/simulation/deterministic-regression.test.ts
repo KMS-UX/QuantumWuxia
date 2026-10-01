@@ -32,6 +32,7 @@ function makeSimulation(): SimulationState {
       inventory: [],
       locationId: 'village',
     },
+    ledger: [],
     world: {
       turn: 3,
       locationIds: ['village', 'mountain'],
@@ -116,6 +117,9 @@ test('blocked travel does not change location or advance the turn', () => {
   assert.equal(result.status, 'blocked');
   assert.equal(result.state.character.locationId, 'village');
   assert.equal(result.state.world.turn, 3);
+  assert.equal(result.ledger.length, 1);
+  assert.equal(result.state.ledger.length, 1);
+  assert.equal(result.state.ledger[0].provenance, 'deterministic-resolver');
 });
 
 test('explicit Qi cost blocks an action when Qi is insufficient', () => {
@@ -125,6 +129,7 @@ test('explicit Qi cost blocks an action when Qi is insufficient', () => {
   assert.equal(result.status, 'blocked');
   assert.equal(result.state.character.qi, 40);
   assert.equal(result.state.world.turn, 3);
+  assert.equal(result.state.ledger.length, 1);
 });
 
 test('invalid rolls are rejected', () => {
@@ -136,6 +141,32 @@ test('invalid rolls are rejected', () => {
 test('invalid simulation state is rejected before resolution', () => {
   const invalid = makeSimulation();
   invalid.character.hp = invalid.character.maxHp + 1;
+
+  assert.throws(
+    () => resolveAction(invalid, makeAction(), 50),
+    /Invalid simulation state/,
+  );
+});
+
+test('invalid persisted ledger entries are rejected before resolution', () => {
+  const invalid = makeSimulation();
+  invalid.ledger.push({
+    eventId: '',
+    turn: -1,
+    actorId: '',
+    actionKind: 'inspect',
+    actionDescription: '',
+    targetIds: [],
+    locationId: 'village',
+    causes: [],
+    effects: [],
+    witnesses: [],
+    knowledgeConsequences: [],
+    provenance: 'deterministic-resolver',
+    causalLinks: [],
+    eventType: 'action.resolved',
+    payload: {},
+  });
 
   assert.throws(
     () => resolveAction(invalid, makeAction(), 50),
@@ -213,6 +244,7 @@ test('existing canonical simulation attributes and Qi survive compatibility roun
   assert.equal(next.simulation?.character.qi, 17);
   assert.equal(next.character?.stats.currentMana, 17);
   assert.equal(next.character?.stats.maxMana, 60);
+  assert.equal(next.simulation?.ledger.length, 0);
 });
 
 test('legacy migration uses documented compatibility mappings only when no simulation state exists', () => {

@@ -5,6 +5,7 @@ import type { SimulationState } from './types';
 function fixture(): SimulationState {
   return {
     schemaVersion: 1,
+    ledger: [],
     character: {
       id: 'player',
       name: 'Tester',
