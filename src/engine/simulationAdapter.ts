@@ -159,5 +159,5 @@ export function simulationStateToPromptContext(simulation: SimulationState): str
     `Nearby known people: ${nearbyNpcs}`,
     `Local rumors: ${activeRumors}`,
     `Known facts: ${simulation.world.knownFacts.join(', ') || 'none'}`,
-  ].join('\\n');
+  ].join('\n');
 }
