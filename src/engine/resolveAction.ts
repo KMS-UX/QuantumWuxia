@@ -11,6 +11,7 @@ import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu
 import { applyCausalityV3 } from './jianghuCausalityV3';
 import { processInformation, advanceCausalChains } from './jianghuInformationV4';
 import { advanceCausalityV5 } from './jianghuCausalityV5';
+import { normalizeProposedAction, validateProposedAction } from './actionContract';
 
 const DIFFICULTY: Record<ProposedAction['kind'], number> = {
   inspect: 25,
@@ -50,12 +51,11 @@ export function resolveAction(
   if (!Number.isInteger(roll) || roll < 0 || roll > 99) {
     throw new RangeError('roll must be an integer between 0 and 99.');
   }
-  if (!action.description.trim()) throw new Error('Action description must not be empty.');
-  if (action.qiCost !== undefined && (!Number.isFinite(action.qiCost) || action.qiCost < 0)) {
-    throw new Error('qiCost must be a finite non-negative number.');
-  }
-  if (action.timeCost !== undefined && (!Number.isFinite(action.timeCost) || action.timeCost < 0)) {
-    throw new Error('timeCost must be a finite non-negative number.');
+
+  const action = normalizeProposedAction(input, action);
+  const actionIssues = validateProposedAction(input, normalizedAction);
+  if (actionIssues.length > 0) {
+    throw new Error(`Invalid proposed action: ${actionIssues.map(i => `${i.path}: ${i.message}`).join('; ')}`);
   }
 
   const state: SimulationState = {
@@ -89,7 +89,7 @@ export function resolveAction(
   };
   const events: StateEvent[] = [];
   const c = state.character;
-  const qiCost = action.qiCost ?? (action.kind === 'attack' ? 0 : action.kind === 'meditate' ? 0 : 0);
+  const qiCost = normalizedAction.qiCost ?? (normalizedAction.kind === 'attack' ? 0 : normalizedAction.kind === 'meditate' ? 0 : 0);
   const timeCost = action.timeCost ?? (action.kind === 'rest' ? 2 : action.kind === 'travel' ? 2 : 1);
 
   if (action.kind === 'travel') {
