@@ -28,6 +28,22 @@ export function getNpcRelevantLedgerEvents(
   return ledger.filter(entry => canNpcKnowLedgerEntry(entry, npcId));
 }
 
+export function getNpcRelevantMemories(j: JianghuState, npcId: string, limit = 12): NPCMemory[] {
+  const npc = j.npcs.find(candidate => candidate.id === npcId);
+  if (!npc) return [];
+  return [...npc.memories]
+    .sort((a, b) => b.turn - a.turn || b.confidence - a.confidence || a.id.localeCompare(b.id))
+    .slice(0, limit);
+}
+
+export function npcHasMemory(
+  j: JianghuState,
+  npcId: string,
+  predicate: (memory: NPCMemory) => boolean,
+): boolean {
+  return getNpcRelevantMemories(j, npcId).some(predicate);
+}
+
 export function getNpcKnownRumors(j: JianghuState, npcId: string): RumorState[] {
   return j.rumors.filter(rumor => rumor.knownBy.includes(npcId));
 }
@@ -42,6 +58,6 @@ export function getNpcKnowledgeContext(
     npcId,
     knownLedgerEntries: getNpcRelevantLedgerEvents(ledger, npcId),
     knownRumors: getNpcKnownRumors(j, npcId),
-    memories: npc ? npc.memories.map(memory => ({ ...memory })) : [],
+    memories: getNpcRelevantMemories(j, npcId),
   };
 }
