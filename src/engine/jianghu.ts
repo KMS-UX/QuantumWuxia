@@ -52,6 +52,7 @@ export interface RumorState {
   credibility: number;
   knownBy: string[];
   createdTurn: number;
+  spreadRate: number;
 }
 
 export interface RelationshipState {
@@ -90,6 +91,25 @@ export interface WorldEventState {
   active: boolean;
   createdTurn: number;
   expiresTurn?: number;
+}
+
+
+export interface FactionRelationState {
+  id: string;
+  factionAId: string;
+  factionBId: string;
+  trust: number;
+  hostility: number;
+  trade: number;
+}
+
+export interface MarketState {
+  locationId: string;
+  goods: Record<string, number>;
+  basePrices: Record<string, number>;
+  priceMultipliers: Record<string, number>;
+  scarcity: Record<string, number>;
+  lastUpdatedTurn: number;
 }
 
 export interface JianghuState {
@@ -169,6 +189,8 @@ export const DEFAULT_JIANGHU: JianghuState = {
   obligations: [],
   worldEvents: [],
   knowledgeVersion: 1,
+  factionRelations: [{ id: 'frel-jade-black', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', trust: 0, hostility: 15, trade: 30 }],
+  markets: [{ locationId: 'The Crossroads', goods: { tea: 20, rice: 15, medicine: 8 }, basePrices: { tea: 4, rice: 3, medicine: 12 }, priceMultipliers: { tea: 1, rice: 1, medicine: 1 }, scarcity: { tea: 0, rice: 0, medicine: 20 }, lastUpdatedTurn: 0 }],
 };
 
 function cloneJianghu(j: JianghuState): JianghuState {
@@ -180,11 +202,19 @@ function cloneJianghu(j: JianghuState): JianghuState {
     rumors: j.rumors.map(r => ({ ...r, knownBy: [...r.knownBy] })),
     obligations: j.obligations.map(o => ({ ...o })),
     worldEvents: j.worldEvents.map(e => ({ ...e, factionIds: [...e.factionIds] })),
+    factionRelations: (j.factionRelations ?? []).map(r => ({ ...r })),
+    markets: (j.markets ?? []).map(m => ({ ...m, goods: { ...m.goods }, basePrices: { ...m.basePrices }, priceMultipliers: { ...m.priceMultipliers }, scarcity: { ...m.scarcity } })),
   };
 }
 
-export function createDefaultJianghu(): JianghuState {
-  return cloneJianghu(DEFAULT_JIANGHU);
+export function createDefaultJianghu(startingLocationId = 'The Crossroads'): JianghuState {
+  const jianghu = cloneJianghu(DEFAULT_JIANGHU);
+  for (const npc of jianghu.npcs) npc.locationId = startingLocationId;
+  for (const faction of jianghu.factions) {
+    if (faction.territory.includes('The Crossroads')) faction.territory = [startingLocationId];
+  }
+  for (const market of jianghu.markets ?? []) market.locationId = startingLocationId;
+  return jianghu;
 }
 
 function clamp(value: number, min: number, max: number): number {
