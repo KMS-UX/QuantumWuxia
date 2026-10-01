@@ -1,5 +1,5 @@
 import type { SimulationState, StateEvent } from './types';
-import type { JianghuState, CausalChainState, KnowledgeRecord, LocationConditionState } from './jianghu';
+import type { JianghuState, CausalChainState, LocationConditionState } from './jianghu';
 
 export type V5Branch = 'escalate' | 'deescalate' | 'suppress' | 'confirm' | 'false' | 'react';
 export interface V5Result { jianghu: JianghuState; events: StateEvent[]; }
