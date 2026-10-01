@@ -341,11 +341,11 @@ export function applyJianghuAction(
       }
       events.push({
         type: 'world.relationship_changed',
-        payload: { subjectId: simulation.character.id, targetId: npc.id, trust: relationship.trust, respect: relationship.respect },
+        causes: [`player:interaction`, `npc:${npc.id}:response`], witnesses: [npc.id], payload: { subjectId: simulation.character.id, targetId: npc.id, trust: relationship.trust, respect: relationship.respect },
       });
       events.push({
         type: 'world.npc_memory_added',
-        payload: { npcId: npc.id, memoryId: npc.memories[npc.memories.length - 1].id },
+        causes: [`player:interaction`, `npc:${npc.id}:memory-formation`], witnesses: [npc.id], knowledgeConsequences: [`npc:${npc.id}:memory:${npc.memories[npc.memories.length - 1].id}`], payload: { npcId: npc.id, memoryId: npc.memories[npc.memories.length - 1].id },
       });
     }
   }
@@ -372,7 +372,7 @@ export function applyJianghuAction(
       });
       events.push({
         type: 'world.relationship_changed',
-        payload: { subjectId: simulation.character.id, targetId: npc.id, trust: relationship.trust, grudge: relationship.grudge, fear: relationship.fear },
+        causes: [`player:interaction`, `npc:${npc.id}:relationship-update`], witnesses: [npc.id], payload: { subjectId: simulation.character.id, targetId: npc.id, trust: relationship.trust, grudge: relationship.grudge, fear: relationship.fear },
       });
     }
   }
@@ -413,7 +413,7 @@ function propagateRumors(jianghu: JianghuState, simulation: SimulationState, eve
       if ((rumor.credibility + npc.disposition) < 45) continue;
       rumor.knownBy.push(npc.id);
       if (rumor.status === 'unverified' && rumor.credibility >= 60) rumor.status = 'plausible';
-      events.push({ type: 'world.rumor_spread', payload: { rumorId: rumor.id, npcId: npc.id } });
+      events.push({ type: 'world.rumor_spread', causes: [`rumor:${rumor.id}`, `npc:${npc.id}:transmission`], witnesses: [npc.id], knowledgeConsequences: [`rumor:${rumor.id}:known-by:${npc.id}`], payload: { rumorId: rumor.id, npcId: npc.id } });
     }
     if (rumor.knownBy.includes(simulation.character.id)) {
       simulation.world.knownRumorIds = Array.from(new Set([...(simulation.world.knownRumorIds ?? []), rumor.id]));
@@ -431,7 +431,7 @@ function advanceNpcGoals(jianghu: JianghuState, simulation: SimulationState, eve
     else goal.progress = clamp(goal.progress + 1, 0, 100);
     if (goal.progress >= 100) {
       goal.active = false;
-      events.push({ type: 'world.npc_goal_completed', payload: { npcId: npc.id, goalId: goal.id } });
+      events.push({ type: 'world.npc_goal_completed', causes: [`npc:${npc.id}:goal:${goal.id}`, `goal:${goal.kind}`], witnesses: [npc.id], knowledgeConsequences: [`npc:${npc.id}:goal-completed:${goal.id}`], payload: { npcId: npc.id, goalId: goal.id } });
     }
   }
 }
@@ -469,7 +469,7 @@ export function tickJianghu(
 
   events.push({
     type: 'world.jianghu_ticked',
-    payload: { turn, npcCount: jianghu.npcs.length, factionCount: jianghu.factions.length },
+    causes: [`world:turn:${turn}:tick`], payload: { turn, npcCount: jianghu.npcs.length, factionCount: jianghu.factions.length },
   });
 
   return { jianghu, events };
