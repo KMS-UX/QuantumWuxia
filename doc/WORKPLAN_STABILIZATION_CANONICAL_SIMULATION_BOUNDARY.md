@@ -2,7 +2,7 @@
 
 **Status:** Approved / In progress  
 **Baseline:** `main` after Jianghu Causality v5  
-**Work branch:** `explicit-legacy-simulation-migration`  
+**Work branch:** `restore-typecheck-and-action-contract`  
 **Date:** 2026-10-01
 
 ## 1. Purpose
@@ -159,7 +159,7 @@ The current `ProposedAction` is intentionally small. Expand it only after the bo
 
 Target fields:
 
-- action kind;
+- [x] action kind;
 - actor;
 - target;
 - destination;
