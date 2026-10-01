@@ -1,0 +1,45 @@
+import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
+import { createDefaultWuxiaCharacter } from './wuxia';
+import type { ProposedAction, SimulationState } from './types';
+
+function fixture(): SimulationState {
+  const base = {
+    id: 'player',
+    name: 'Tester',
+    hp: 100,
+    maxHp: 100,
+    qi: 50,
+    maxQi: 50,
+    fatigue: 0,
+    attributes: { strength: 10, agility: 10, constitution: 10, perception: 10, intelligence: 10, charisma: 10, luck: 10 },
+    conditions: [],
+    inventory: [],
+    locationId: 'The Crossroads',
+  };
+  return { schemaVersion: 1, character: { ...base, wuxia: createDefaultWuxiaCharacter(base).wuxia }, world: { turn: 3, locationIds: ['The Crossroads'], knownFacts: [] } };
+}
+
+test('talk records an NPC memory and relationship', () => {
+  const simulation = fixture();
+  const action: ProposedAction = { kind: 'talk', description: 'Ask the tea keeper about local dangers', targetId: 'npc-teahouse-keeper', risk: 'low' };
+  const result = applyJianghuAction(createDefaultJianghu(), simulation, action);
+  expect(result.jianghu.relationships[0].trust).toBe(1);
+  expect(result.jianghu.npcs[0].memories).toHaveLength(1);
+});
+
+test('tick is immutable and evolves faction pressure', () => {
+  const input = createDefaultJianghu();
+  const before = JSON.stringify(input);
+  const result = tickJianghu(input, fixture());
+  expect(JSON.stringify(input)).toBe(before);
+  expect(result.jianghu.factions).toHaveLength(input.factions.length);
+});
+
+test('NPC attack creates a persistent grudge', () => {
+  const simulation = fixture();
+  const action: ProposedAction = { kind: 'attack', description: 'Strike the swordsman', targetId: 'npc-wandering-swordsman', risk: 'high' };
+  const result = applyJianghuAction(createDefaultJianghu(), simulation, action);
+  const relationship = result.jianghu.relationships[0];
+  expect(relationship.grudge).toBe(5);
+  expect(relationship.trust).toBe(-10);
+});
