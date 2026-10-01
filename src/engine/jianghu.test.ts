@@ -1,4 +1,4 @@
-import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
+import { applyJianghuAction, createDefaultJianghu, createRumor, tickJianghu } from './jianghu';
 import { createDefaultWuxiaCharacter } from './wuxia';
 import type { ProposedAction, SimulationState } from './types';
 
@@ -16,7 +16,11 @@ function fixture(): SimulationState {
     inventory: [],
     locationId: 'The Crossroads',
   };
-  return { schemaVersion: 1, character: { ...base, wuxia: createDefaultWuxiaCharacter(base).wuxia }, world: { turn: 3, locationIds: ['The Crossroads'], knownFacts: [] } };
+  return {
+    schemaVersion: 1,
+    character: { ...base, wuxia: createDefaultWuxiaCharacter(base).wuxia },
+    world: { turn: 3, locationIds: ['The Crossroads'], knownFacts: [], knownRumorIds: [], knownNpcIds: [] },
+  };
 }
 
 test('talk records an NPC memory and relationship', () => {
@@ -42,4 +46,25 @@ test('NPC attack creates a persistent grudge', () => {
   const relationship = result.jianghu.relationships[0];
   expect(relationship.grudge).toBe(5);
   expect(relationship.trust).toBe(-10);
+});
+
+test('rumors propagate to local NPCs and player knowledge', () => {
+  const simulation = fixture();
+  let world = createRumor(createDefaultJianghu(), 'A bandit chief was seen nearby.', 'npc-teahouse-keeper', 'The Crossroads', 1, 80);
+  const result = tickJianghu(world, simulation);
+  expect(result.jianghu.rumors[0].knownBy).toContain('npc-wandering-swordsman');
+});
+
+test('NPC goals advance during world ticks', () => {
+  const result = tickJianghu(createDefaultJianghu(), fixture());
+  const swordsman = result.jianghu.npcs.find(npc => npc.id === 'npc-wandering-swordsman');
+  expect(swordsman?.goals.some(goal => goal.progress > 0)).toBe(true);
+});
+
+test('world truth is separate from player knowledge', () => {
+  const simulation = fixture();
+  const world = createDefaultJianghu();
+  const result = tickJianghu(createRumor(world, 'Secret meeting tonight.', 'npc-teahouse-keeper', 'The Crossroads', 1, 30), simulation);
+  expect(result.jianghu.rumors[0].text).toBe('Secret meeting tonight.');
+  expect(simulation.world.knownRumorIds ?? []).not.toContain(result.jianghu.rumors[0].id);
 });
