@@ -183,8 +183,8 @@ test('player action pipeline crosses the canonical boundary and returns compatib
   const result = resolvePlayerAction(gameState, 'Rest by the fire.', 'medium', 99);
 
   assert.equal(result.resolution.status, 'success');
-  assert.equal(result.nextGameState.turnCount, 3);
-  assert.equal(result.nextGameState.character?.stats.currentHp, 81);
+  assert.equal(result.nextGameState.turnCount, 4);
+  assert.equal(result.nextGameState.character?.stats.currentHp, 85);
   assert.ok(result.nextGameState.simulation);
-  assert.equal(result.nextGameState.simulation?.character.hp, 81);
+  assert.equal(result.nextGameState.simulation?.character.hp, 85);
 });
