@@ -1,4 +1,5 @@
 import type { SimulationState, StateEvent } from './types';
+import { chainPace } from './jianghu';
 import type { JianghuState, KnowledgeRecord, CausalChainState, NPCState, RumorState } from './jianghu';
 
 const clamp = (v: number, min = 0, max = 100) => Math.max(min, Math.min(max, v));
@@ -108,7 +109,7 @@ export function processInformation(
   return { jianghu: j, events };
 }
 
-function ensureChain(j: JianghuState, eventId: string, kind: CausalChainState['kind'], description: string, turn: number): CausalChainState {
+function ensureChain(j: JianghuState, eventId: string, kind: CausalChainState['kind'], description: string, turn: number, interval = 1): CausalChainState {
   // Match completed chains too: a finished chain must not respawn (duplicate id, repeated step-1 effects) while its event stays active.
   const existing = j.causalChains?.find(c => c.rootEventId === eventId);
   if (existing) return existing;
@@ -121,7 +122,7 @@ function ensureChain(j: JianghuState, eventId: string, kind: CausalChainState['k
     sourceIds: [eventId],
     active: true,
     createdTurn: turn,
-    nextCheckTurn: turn + 1,
+    nextCheckTurn: turn + interval,
   };
   j.causalChains = [...(j.causalChains ?? []), chain];
   return chain;
@@ -144,12 +145,13 @@ export function advanceCausalChains(
     if (worldEvent.kind === 'conflict' || worldEvent.kind === 'political') kind = 'faction';
     if (worldEvent.kind === 'market') kind = 'economic';
     if (worldEvent.kind === 'rumor') kind = 'information';
-    const chain = ensureChain(j, worldEvent.id, kind, worldEvent.description, turn);
+    const pace = chainPace(worldEvent);
+    const chain = ensureChain(j, worldEvent.id, kind, worldEvent.description, turn, pace.interval);
     if (!chain.active || chain.nextCheckTurn > turn) continue;
 
     chain.step += 1;
     chain.sourceIds.push(`turn-${turn}`);
-    chain.nextCheckTurn = turn + 1;
+    chain.nextCheckTurn = turn + pace.interval;
 
     if (chain.step === 1 && kind === 'information') {
       worldEvent.severity = clamp(worldEvent.severity + 1, 1, 5);
@@ -164,9 +166,24 @@ export function advanceCausalChains(
         for (const good of Object.keys(market.scarcity)) market.scarcity[good] = clamp(market.scarcity[good] + worldEvent.severity * 2);
       }
     } else if (chain.step >= 2) {
-      const nearby = j.npcs.filter(n => n.alive && n.locationId === simulation.character.locationId);
-      for (const npc of nearby) {
-        npc.disposition = clamp(npc.disposition - (kind === 'faction' ? 1 : 0), -100, 100);
+      // Local mood erosion keeps its original two-stage bound (stages 2 and 3), however long the chain runs.
+      if (chain.step <= 3) {
+        const nearby = j.npcs.filter(n => n.alive && n.locationId === simulation.character.locationId);
+        for (const npc of nearby) {
+          npc.disposition = clamp(npc.disposition - (kind === 'faction' ? 1 : 0), -100, 100);
+        }
+      }
+      // Slow-burn chains keep building pressure on every middle stage (bounded by `steps` <= 12).
+      if (pace.custom && chain.step < pace.steps) {
+        if (kind === 'faction') {
+          for (const factionId of worldEvent.factionIds) {
+            const faction = j.factions.find(f => f.id === factionId);
+            if (faction) faction.internalTension = clamp(faction.internalTension + worldEvent.severity, 0, 100);
+          }
+        } else if (kind === 'economic') {
+          const market = j.markets?.find(m => m.locationId === worldEvent.locationId);
+          if (market) for (const good of Object.keys(market.scarcity)) market.scarcity[good] = clamp(market.scarcity[good] + worldEvent.severity);
+        }
       }
     }
 
@@ -175,7 +192,7 @@ export function advanceCausalChains(
       causes: [`causal-chain:${chain.id}`, `root-event:${chain.rootEventId}`], causalLinks: [chain.rootEventId], payload: { chainId: chain.id, rootEventId: chain.rootEventId, step: chain.step, kind: chain.kind },
     });
 
-    if (chain.step >= 3 || !worldEvent.active) {
+    if (chain.step >= pace.steps || !worldEvent.active) {
       chain.active = false;
       events.push({
         type: 'world.causal_chain_completed',

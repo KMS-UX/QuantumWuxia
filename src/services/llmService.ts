@@ -1,4 +1,5 @@
 import { LLMConfig, GameTurn, Character, GameState, GameChoice } from '../types/game';
+import { parseNarration } from '../ai/validateNarration';
 
 export interface LLMResponse {
   narrative: string;
@@ -238,41 +239,33 @@ async function callCustomEndpoint(config: LLMConfig, messages: { role: string; c
   return JSON.stringify(data);
 }
 
-function parseLLMResponse(raw: string): LLMResponse {
-  // Try to extract JSON from the response
-  let jsonStr = raw;
-  
-  // Try to find JSON block
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    jsonStr = jsonMatch[0];
-  }
-  
-  try {
-    const parsed = JSON.parse(jsonStr);
-    return {
-      narrative: parsed.narrative || 'The story continues...',
-      choices: parsed.choices || generateFallbackChoices(),
-      stateUpdates: parsed.stateUpdates || {},
-    };
-  } catch {
-    // If JSON parsing fails, treat the whole response as narrative
-    return {
-      narrative: raw.substring(0, 500),
-      choices: generateFallbackChoices(),
-      stateUpdates: {},
-    };
+async function callProvider(config: LLMConfig, messages: Array<{ role: string; content: string }>): Promise<string> {
+  switch (config.provider) {
+    case 'openai':
+      return callOpenAI(config, messages);
+    case 'ollama':
+      return callOllama(config, messages);
+    case 'lmstudio':
+      return callLMStudio(config, messages);
+    case 'custom':
+      return callCustomEndpoint(config, messages);
+    default:
+      throw new Error(`Unknown provider: ${config.provider}`);
   }
 }
 
-function generateFallbackChoices(): GameChoice[] {
-  return [
-    { id: 1, text: 'Look around carefully', risk: 'low' },
-    { id: 2, text: 'Proceed forward cautiously', risk: 'medium' },
-    { id: 3, text: 'Search for hidden paths', risk: 'low' },
-    { id: 4, text: 'Call out to see if anyone is nearby', risk: 'medium' },
-    { id: 5, text: 'Prepare for potential danger', risk: 'high' },
-  ];
+/**
+ * Call the model and validate its output at the AI boundary (src/ai/validateNarration.ts).
+ * Repairs are logged; if no usable narrative can be recovered the call is retried once.
+ */
+async function narrate(config: LLMConfig, messages: Array<{ role: string; content: string }>): Promise<LLMResponse> {
+  let validation = parseNarration(await callProvider(config, messages));
+  if (validation.narrativeIsFallback) {
+    console.warn('Narrator output unusable, retrying once:', validation.issues);
+    validation = parseNarration(await callProvider(config, messages));
+  }
+  if (validation.issues.length) console.warn('Narrator output repaired:', validation.issues);
+  return validation.result;
 }
 
 export async function generateNarrative(
@@ -287,26 +280,7 @@ export async function generateNarrative(
     { role: 'user', content: contextPrompt },
   ];
 
-  let rawResponse: string;
-
-  switch (config.provider) {
-    case 'openai':
-      rawResponse = await callOpenAI(config, messages);
-      break;
-    case 'ollama':
-      rawResponse = await callOllama(config, messages);
-      break;
-    case 'lmstudio':
-      rawResponse = await callLMStudio(config, messages);
-      break;
-    case 'custom':
-      rawResponse = await callCustomEndpoint(config, messages);
-      break;
-    default:
-      throw new Error(`Unknown provider: ${config.provider}`);
-  }
-
-  return parseLLMResponse(rawResponse);
+  return narrate(config, messages);
 }
 
 export async function generateCharacterIntro(
@@ -321,35 +295,16 @@ export async function generateCharacterIntro(
       role: 'user', 
       content: `Begin a new adventure for this character in a ${worldTheme} setting:
       
-Character: ${character.name}, a level 1 ${character.race} ${character.class}.
+${character.originId ? `Character: ${character.name}, a ${character.class} (Wuxia origin).` : `Character: ${character.name}, a level 1 ${character.race} ${character.class}.`}
 Background: ${character.background}
-Stats: STR ${character.stats.strength}, AGI ${character.stats.agility}, INT ${character.stats.intelligence}, CHA ${character.stats.charisma}, LCK ${character.stats.luck}
-Starting equipment: ${character.inventory.map(i => i.name).join(', ') || 'Nothing'}
+${character.originId ? '' : `Stats: STR ${character.stats.strength}, AGI ${character.stats.agility}, INT ${character.stats.intelligence}, CHA ${character.stats.charisma}, LCK ${character.stats.luck}
+`}Starting equipment: ${character.inventory.map(i => i.name).join(', ') || 'Nothing'}
 ${scenario ? `\nAuthored starting scenario (do not contradict it, do not change the location, do not invent new named factions or people; the player's five choices are supplied separately, so "choices" may be an empty array):\n${scenario}\n` : ''}
 Create an engaging opening scene that introduces the character to the world. Set the mood, describe the surroundings, and present an initial situation that the character must respond to. Respond in valid JSON format.` 
     },
   ];
 
-  let rawResponse: string;
-
-  switch (config.provider) {
-    case 'openai':
-      rawResponse = await callOpenAI(config, messages);
-      break;
-    case 'ollama':
-      rawResponse = await callOllama(config, messages);
-      break;
-    case 'lmstudio':
-      rawResponse = await callLMStudio(config, messages);
-      break;
-    case 'custom':
-      rawResponse = await callCustomEndpoint(config, messages);
-      break;
-    default:
-      throw new Error(`Unknown provider: ${config.provider}`);
-  }
-
-  return parseLLMResponse(rawResponse);
+  return narrate(config, messages);
 }
 
 export async function testConnection(config: LLMConfig): Promise<{ success: boolean; message: string }> {

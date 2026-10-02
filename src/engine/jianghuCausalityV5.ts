@@ -1,4 +1,5 @@
 import type { SimulationState, StateEvent } from './types';
+import { chainPace } from './jianghu';
 import type { JianghuState, CausalChainState, LocationConditionState } from './jianghu';
 
 export type V5Branch = 'escalate' | 'deescalate' | 'suppress' | 'confirm' | 'false' | 'react';
@@ -94,8 +95,9 @@ export function advanceCausalityV5(input: JianghuState, simulation: SimulationSt
     const root = j.worldEvents.find(e => e.id === chain.rootEventId);
     if (!root) continue;
     const branch = chooseBranch(j, chain);
+    const pace = chainPace(root);
     chain.step += 1;
-    chain.nextCheckTurn = turn + 1;
+    chain.nextCheckTurn = turn + pace.interval;
     chain.sourceIds.push('v5-' + branch + '-turn-' + turn);
     if (branch === 'escalate') root.severity = clamp(root.severity + 1, 1, 5);
     if (branch === 'deescalate' || branch === 'suppress') root.severity = Math.max(1, root.severity - 1);
@@ -109,7 +111,7 @@ export function advanceCausalityV5(input: JianghuState, simulation: SimulationSt
     }
     verifyKnowledge(j, simulation, root.id, branch);
     events.push({ type: 'world.causal_branch_selected', causes: [`causal-chain:${chain.id}`, `root-event:${root.id}`], causalLinks: [root.id], payload: { chainId: chain.id, rootEventId: root.id, branch, step: chain.step } });
-    if (chain.step >= 3 || (root.severity <= 1 && (branch === 'deescalate' || branch === 'suppress'))) {
+    if (chain.step >= pace.steps || (root.severity <= 1 && (branch === 'deescalate' || branch === 'suppress'))) {
       chain.active = false; root.active = false;
       events.push({ type: 'world.causal_chain_completed', causes: [`causal-chain:${chain.id}:completion`, `root-event:${root.id}`], causalLinks: [root.id], payload: { chainId: chain.id, rootEventId: root.id, branch } });
     }

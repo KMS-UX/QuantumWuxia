@@ -102,6 +102,20 @@ export interface WorldEventState {
   active: boolean;
   createdTurn: number;
   expiresTurn?: number;
+  /**
+   * Optional slow-burn pacing for this event's causal chain. `steps` is how many
+   * stages the chain has; `interval` is how many turns pass between stages.
+   * Omitted means the original behaviour: 3 stages, one per turn.
+   */
+  pace?: { steps: number; interval: number };
+}
+
+/** Normalised, bounded chain pacing for a world event. */
+export function chainPace(event: Pick<WorldEventState, 'pace'>): { steps: number; interval: number; custom: boolean } {
+  if (!event.pace) return { steps: 3, interval: 1, custom: false };
+  const steps = Math.max(1, Math.min(12, Math.floor(event.pace.steps)));
+  const interval = Math.max(1, Math.min(20, Math.floor(event.pace.interval)));
+  return { steps, interval, custom: true };
 }
 
 
@@ -450,7 +464,12 @@ export function tickJianghu(
   for (const faction of jianghu.factions) {
     const drift = faction.internalTension > 70 ? -1 : faction.resources < 20 ? -1 : 0;
     faction.resources = clamp(faction.resources + drift, 0, 100);
-    faction.internalTension = clamp(faction.internalTension + (faction.resources < 15 ? 1 : -1), 0, 100);
+    // Tension used to fall by 1 every turn unconditionally, so it always drained to 0 within ~10-35 turns
+    // and slow-burn events could never build pressure. It now cools only every third turn, and not at all
+    // while the faction is party to an active world event.
+    const inActiveEvent = jianghu.worldEvents.some(e => e.active && e.factionIds.includes(faction.id));
+    const cooling = !inActiveEvent && turn % 3 === 0 ? -1 : 0;
+    faction.internalTension = clamp(faction.internalTension + (faction.resources < 15 ? 1 : cooling), 0, 100);
   }
 
   for (const npc of jianghu.npcs) {

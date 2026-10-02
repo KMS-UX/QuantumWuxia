@@ -178,13 +178,13 @@ export const RUMORS: Array<Omit<RumorState, 'createdTurn'> & { fantasy?: boolean
 export const WORLD_EVENTS: WorldEventState[] = [
   { id: 'event-toll-dispute', kind: 'conflict', title: 'The Ferry Toll Dispute',
     description: 'Jade Hall couriers and the Black River argue over the Lantern Ferry toll; tempers are rising.',
-    locationId: 'Lantern Ferry', factionIds: ['faction-jade-hall', 'faction-black-river'], severity: 2, active: true, createdTurn: 0 },
+    locationId: 'Lantern Ferry', factionIds: ['faction-jade-hall', 'faction-black-river'], severity: 2, active: true, createdTurn: 0, pace: { steps: 5, interval: 4 } },
   { id: 'event-fever-season', kind: 'natural', title: 'Fever Season in Willow Market',
     description: 'A river fever is spreading through the market town; medicine prices are climbing.',
-    locationId: 'Willow Market Town', factionIds: ['faction-willow-guild'], severity: 2, active: true, createdTurn: 0, expiresTurn: 30 },
+    locationId: 'Willow Market Town', factionIds: ['faction-willow-guild'], severity: 2, active: true, createdTurn: 0, expiresTurn: 30, pace: { steps: 4, interval: 6 } },
   { id: 'event-autumn-assembly', kind: 'political', title: 'The Autumn Assembly Approaches',
     description: 'Jade Hall must name an heir before the autumn assembly; rival disciples are positioning themselves.',
-    locationId: 'Jade Hall', factionIds: ['faction-jade-hall'], severity: 3, active: true, createdTurn: 0, expiresTurn: 60 },
+    locationId: 'Jade Hall', factionIds: ['faction-jade-hall'], severity: 3, active: true, createdTurn: 0, expiresTurn: 60, pace: { steps: 6, interval: 8 } },
 ];
 
 /** Stock 20 is "no scarcity" in the v3 price model; lower stock raises scarcity and price. */

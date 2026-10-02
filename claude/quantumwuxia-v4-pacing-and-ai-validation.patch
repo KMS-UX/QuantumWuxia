@@ -1,0 +1,750 @@
+diff --git a/doc/AUDIT_2026-10-01.md b/doc/AUDIT_2026-10-01.md
+index b1f4638..560cb69 100644
+--- a/doc/AUDIT_2026-10-01.md
++++ b/doc/AUDIT_2026-10-01.md
+@@ -112,4 +112,25 @@ Findings 1 and 2 in section 4 are resolved. Still open: the narrator event diges
+ 
+ **New finding (pacing, not changed):** every starting world event's causal chain completes within about 4 turns, including "The Autumn Assembly Approaches" (expires turn 60). Chains are capped at 3 steps by design (v4), so the seed's slow-burn tensions resolve far faster than their authored timescale. Options: raise the step cap per event kind, add a `pace` field to world events, or let chain steps wait several turns. This is an engine design decision, so I left it for you.
+ 
+-**Still open:** LLM output schema validation and later-turn `locationChange` (unvalidated), seeded rolls, legacy `Combat.tsx`, legacy-vs-simulation HP/mana duplication, resolver depth (techniques, Qi costs, damage).
++**Still open:** seeded rolls, legacy `Combat.tsx`, legacy-vs-simulation HP/mana duplication, resolver depth (techniques, Qi costs, damage).
++
++
++## 9. Follow-up applied: pacing, and a validated AI boundary
++
++**Correction to §4 finding 5:** I earlier wrote that a later-turn `locationChange` from the LLM was applied unvalidated. That was wrong: the store only reads `stateUpdates.locationChange` when starting a new game, and for origin characters that value is overwritten with the authored start. The real gaps were the parser, below.
++
++### Pacing (`src/engine/jianghu*.ts`, seed)
++- `WorldEventState.pace?: { steps, interval }` (bounded 1-12 stages, 1-20 turns; omitted = original 3 stages, 1 per turn). `chainPace()` is the single source; V4 and V5 both use it for cadence and completion.
++- Mid stages of a paced faction/economic chain keep adding pressure; the local NPC mood erosion keeps its original two-stage bound.
++- **Bug found:** faction `internalTension` fell by 1 every turn unconditionally, so it always drained to 0 and no slow-burn could build. It now cools 1 every third turn, and not at all while the faction is party to an active event. (This changes tuning for every game, not only authored events.)
++- Seed paces: Ferry Toll Dispute 5 stages / 4 turns, Fever Season 4 / 6, Autumn Assembly 6 / 8. In a 70-turn run they complete on turns 21, 25 and 49 (previously all within ~4 turns). Jade Hall tension ends at 53 instead of 0.
++- **Open finding:** V5 causal branching (escalate / de-escalate / confirm / false, location conditions, faction and market reactions) never runs in live play: V4 advances every chain first and sets the shared `nextCheckTurn`, which makes V5 ineligible. 70 live turns produced 0 `causal_branch_selected` events. V5 is only exercised by unit tests that build chains by hand. Activating it is a design decision (its default branch for low-severity faction events is "de-escalate", which would end the toll dispute early), so it is untouched apart from honouring `pace`.
++
++### AI boundary (`src/ai/validateNarration.ts`)
++- Replaces the greedy `\{[\s\S]*\}` parse, which broke whenever the model emitted two objects or braces after the JSON.
++- Balanced-object extraction (string- and escape-aware), then validation: narrative must be a non-empty string (truncated JSON is salvaged, plain prose accepted, capped at 4000 chars on a sentence boundary); choices are renumbered 1..5, risk normalised, deduped, trimmed, capped and padded with distinct stock choices; **every `stateUpdates` field is dropped except a validated `locationChange`**, so the model cannot grant HP, gold, items or skills even if the UI is extended later.
++- `llmService` shares one `callProvider` and one `narrate()` (previously duplicated twice); an unusable response is retried once, and repairs are logged.
++- The opening prompt no longer says "level 1 Human" or lists legacy STR/AGI stats for origin characters.
++- The retry path needs a live provider and is not unit-tested; the validator itself is (9 tests including a 500-case junk-input totality check).
++
++Suite: 74 / 74 (+16 this round).
+diff --git a/src/ai/validateNarration.ts b/src/ai/validateNarration.ts
+new file mode 100644
+index 0000000..b2db1e2
+--- /dev/null
++++ b/src/ai/validateNarration.ts
+@@ -0,0 +1,166 @@
++/**
++ * Runtime validation for narrator (LLM) output. Pure functions, no network and no
++ * game-state access, so the AI boundary can be tested exhaustively.
++ *
++ * Contract (Game Bible: the narrator describes, the simulation decides):
++ * - the narrator may supply prose and a list of suggested choices;
++ * - it may NOT change any game state, so every `stateUpdates` field is dropped
++ *   except an optional, validated `locationChange` (legacy opening scenes only).
++ */
++
++export type Risk = 'low' | 'medium' | 'high';
++export interface NarrationChoice { id: number; text: string; risk: Risk }
++export interface NarrationResult {
++  narrative: string;
++  choices: NarrationChoice[];
++  stateUpdates: { locationChange?: string };
++}
++export interface NarrationValidation {
++  result: NarrationResult;
++  /** Human-readable problems found and repaired; empty when the output was clean. */
++  issues: string[];
++  /** True when no usable narrative could be recovered and a stock line was substituted. */
++  narrativeIsFallback: boolean;
++}
++export interface ValidateOptions {
++  /** When provided, a `locationChange` outside this list is dropped. */
++  allowedLocationIds?: string[];
++}
++
++export const MAX_NARRATIVE_CHARS = 4000;
++export const MAX_CHOICE_CHARS = 160;
++export const CHOICE_COUNT = 5;
++export const NARRATIVE_FALLBACK = 'The moment passes in uneasy quiet. (The storyteller lost the thread; choose again.)';
++
++const FALLBACK_CHOICES: Array<Omit<NarrationChoice, 'id'>> = [
++  { text: 'Look around carefully', risk: 'low' },
++  { text: 'Proceed forward cautiously', risk: 'medium' },
++  { text: 'Search for hidden paths', risk: 'low' },
++  { text: 'Call out to see if anyone is nearby', risk: 'medium' },
++  { text: 'Prepare for potential danger', risk: 'high' },
++];
++
++/** Collect every balanced top-level `{...}` span, respecting JSON strings and escapes. */
++export function balancedObjects(text: string): string[] {
++  const found: string[] = [];
++  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
++    let depth = 0; let inString = false; let escaped = false;
++    for (let i = start; i < text.length; i++) {
++      const ch = text[i];
++      if (inString) {
++        if (escaped) escaped = false;
++        else if (ch === '\\') escaped = true;
++        else if (ch === '"') inString = false;
++        continue;
++      }
++      if (ch === '"') inString = true;
++      else if (ch === '{') depth++;
++      else if (ch === '}' && --depth === 0) { found.push(text.slice(start, i + 1)); break; }
++    }
++  }
++  return found;
++}
++
++/** Find the first object in `raw` that parses as JSON and carries a `narrative` field. */
++export function extractNarrationJson(raw: string): Record<string, unknown> | undefined {
++  const cleaned = raw.replace(/```(?:json)?/gi, '');
++  for (const candidate of balancedObjects(cleaned)) {
++    try {
++      const parsed: unknown = JSON.parse(candidate);
++      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && 'narrative' in parsed) {
++        return parsed as Record<string, unknown>;
++      }
++    } catch { /* try the next candidate */ }
++  }
++  return undefined;
++}
++
++/** Recover the narrative from truncated or malformed JSON by reading the string value directly. */
++function salvageNarrative(raw: string): string | undefined {
++  const m = raw.match(/"narrative"\s*:\s*"((?:[^"\\]|\\.)*)/);
++  if (!m) return undefined;
++  try { return JSON.parse(`"${m[1].replace(/\\$/, '')}"`) as string; } catch { return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"'); }
++}
++
++function capNarrative(text: string, issues: string[]): string {
++  if (text.length <= MAX_NARRATIVE_CHARS) return text;
++  issues.push(`narrative truncated from ${text.length} chars`);
++  const cut = text.slice(0, MAX_NARRATIVE_CHARS);
++  const lastStop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('\n'), cut.lastIndexOf('。'));
++  return (lastStop > MAX_NARRATIVE_CHARS * 0.6 ? cut.slice(0, lastStop + 1) : cut).trimEnd();
++}
++
++function normaliseRisk(value: unknown, issues: string[]): Risk {
++  const v = typeof value === 'string' ? value.trim().toLowerCase() : '';
++  if (v === 'low' || v === 'medium' || v === 'high') return v;
++  if (v === 'med' || v === 'moderate') return 'medium';
++  issues.push(`invalid risk ${JSON.stringify(value)} replaced with "medium"`);
++  return 'medium';
++}
++
++function normaliseChoices(value: unknown, issues: string[]): NarrationChoice[] {
++  const out: NarrationChoice[] = [];
++  const seen = new Set<string>();
++  if (value !== undefined && !Array.isArray(value)) issues.push('choices is not an array');
++  const items = Array.isArray(value) ? value : [];
++  for (const item of items) {
++    const rawText = typeof item === 'string' ? item : (item && typeof item === 'object' ? (item as Record<string, unknown>).text : undefined);
++    if (typeof rawText !== 'string') { issues.push('choice without text dropped'); continue; }
++    let text = rawText.replace(/\s+/g, ' ').trim();
++    if (!text) { issues.push('empty choice dropped'); continue; }
++    if (text.length > MAX_CHOICE_CHARS) { text = `${text.slice(0, MAX_CHOICE_CHARS - 1).trimEnd()}…`; issues.push('overlong choice shortened'); }
++    const key = text.toLowerCase();
++    if (seen.has(key)) { issues.push(`duplicate choice dropped: ${text}`); continue; }
++    seen.add(key);
++    const risk = typeof item === 'object' && item ? normaliseRisk((item as Record<string, unknown>).risk, issues) : 'medium';
++    out.push({ id: 0, text, risk });
++  }
++  if (out.length > CHOICE_COUNT) { issues.push(`${out.length} choices supplied; kept first ${CHOICE_COUNT}`); out.length = CHOICE_COUNT; }
++  if (out.length < CHOICE_COUNT) {
++    issues.push(`only ${out.length} valid choices; padded to ${CHOICE_COUNT}`);
++    for (const fallback of FALLBACK_CHOICES) {
++      if (out.length >= CHOICE_COUNT) break;
++      if (!seen.has(fallback.text.toLowerCase())) { seen.add(fallback.text.toLowerCase()); out.push({ id: 0, ...fallback }); }
++    }
++  }
++  return out.map((c, i) => ({ ...c, id: i + 1 }));
++}
++
++export function validateNarration(parsed: Record<string, unknown> | undefined, raw: string, options: ValidateOptions = {}): NarrationValidation {
++  const issues: string[] = [];
++  let narrative: string | undefined;
++  let narrativeIsFallback = false;
++
++  if (parsed && typeof parsed.narrative === 'string' && parsed.narrative.trim()) {
++    narrative = parsed.narrative.trim();
++  } else {
++    if (parsed) issues.push('narrative missing or not a string');
++    narrative = parsed ? undefined : salvageNarrative(raw)?.trim();
++    if (!narrative && !raw.includes('{') && raw.trim()) narrative = raw.trim(); // plain prose reply
++    if (narrative) issues.push(parsed ? 'recovered narrative from raw text' : 'response was not valid JSON; narrative recovered');
++  }
++  if (!narrative) { narrative = NARRATIVE_FALLBACK; narrativeIsFallback = true; issues.push('no usable narrative; stock line substituted'); }
++
++  const stateUpdates: NarrationResult['stateUpdates'] = {};
++  const updates = parsed?.stateUpdates;
++  if (updates && typeof updates === 'object') {
++    const dropped = Object.keys(updates).filter(k => k !== 'locationChange');
++    if (dropped.length) issues.push(`state updates ignored (the simulation owns state): ${dropped.join(', ')}`);
++    const loc = (updates as Record<string, unknown>).locationChange;
++    if (typeof loc === 'string' && loc.trim() && loc.trim().length <= 80) {
++      if (!options.allowedLocationIds || options.allowedLocationIds.includes(loc.trim())) stateUpdates.locationChange = loc.trim();
++      else issues.push(`locationChange "${loc.trim()}" is not a known location; ignored`);
++    } else if (loc !== undefined) issues.push('invalid locationChange ignored');
++  }
++
++  return {
++    result: { narrative: capNarrative(narrative, issues), choices: normaliseChoices(parsed?.choices, issues), stateUpdates },
++    issues,
++    narrativeIsFallback,
++  };
++}
++
++/** Full pipeline: raw model text in, repaired narration out. */
++export function parseNarration(raw: string, options: ValidateOptions = {}): NarrationValidation {
++  return validateNarration(extractNarrationJson(raw), raw, options);
++}
+diff --git a/src/engine/jianghu.ts b/src/engine/jianghu.ts
+index 846fa45..0c3189d 100644
+--- a/src/engine/jianghu.ts
++++ b/src/engine/jianghu.ts
+@@ -102,6 +102,20 @@ export interface WorldEventState {
+   active: boolean;
+   createdTurn: number;
+   expiresTurn?: number;
++  /**
++   * Optional slow-burn pacing for this event's causal chain. `steps` is how many
++   * stages the chain has; `interval` is how many turns pass between stages.
++   * Omitted means the original behaviour: 3 stages, one per turn.
++   */
++  pace?: { steps: number; interval: number };
++}
++
++/** Normalised, bounded chain pacing for a world event. */
++export function chainPace(event: Pick<WorldEventState, 'pace'>): { steps: number; interval: number; custom: boolean } {
++  if (!event.pace) return { steps: 3, interval: 1, custom: false };
++  const steps = Math.max(1, Math.min(12, Math.floor(event.pace.steps)));
++  const interval = Math.max(1, Math.min(20, Math.floor(event.pace.interval)));
++  return { steps, interval, custom: true };
+ }
+ 
+ 
+@@ -450,7 +464,12 @@ export function tickJianghu(
+   for (const faction of jianghu.factions) {
+     const drift = faction.internalTension > 70 ? -1 : faction.resources < 20 ? -1 : 0;
+     faction.resources = clamp(faction.resources + drift, 0, 100);
+-    faction.internalTension = clamp(faction.internalTension + (faction.resources < 15 ? 1 : -1), 0, 100);
++    // Tension used to fall by 1 every turn unconditionally, so it always drained to 0 within ~10-35 turns
++    // and slow-burn events could never build pressure. It now cools only every third turn, and not at all
++    // while the faction is party to an active world event.
++    const inActiveEvent = jianghu.worldEvents.some(e => e.active && e.factionIds.includes(faction.id));
++    const cooling = !inActiveEvent && turn % 3 === 0 ? -1 : 0;
++    faction.internalTension = clamp(faction.internalTension + (faction.resources < 15 ? 1 : cooling), 0, 100);
+   }
+ 
+   for (const npc of jianghu.npcs) {
+diff --git a/src/engine/jianghuCausalityV5.ts b/src/engine/jianghuCausalityV5.ts
+index c3e73dd..1289149 100644
+--- a/src/engine/jianghuCausalityV5.ts
++++ b/src/engine/jianghuCausalityV5.ts
+@@ -1,4 +1,5 @@
+ import type { SimulationState, StateEvent } from './types';
++import { chainPace } from './jianghu';
+ import type { JianghuState, CausalChainState, LocationConditionState } from './jianghu';
+ 
+ export type V5Branch = 'escalate' | 'deescalate' | 'suppress' | 'confirm' | 'false' | 'react';
+@@ -94,8 +95,9 @@ export function advanceCausalityV5(input: JianghuState, simulation: SimulationSt
+     const root = j.worldEvents.find(e => e.id === chain.rootEventId);
+     if (!root) continue;
+     const branch = chooseBranch(j, chain);
++    const pace = chainPace(root);
+     chain.step += 1;
+-    chain.nextCheckTurn = turn + 1;
++    chain.nextCheckTurn = turn + pace.interval;
+     chain.sourceIds.push('v5-' + branch + '-turn-' + turn);
+     if (branch === 'escalate') root.severity = clamp(root.severity + 1, 1, 5);
+     if (branch === 'deescalate' || branch === 'suppress') root.severity = Math.max(1, root.severity - 1);
+@@ -109,7 +111,7 @@ export function advanceCausalityV5(input: JianghuState, simulation: SimulationSt
+     }
+     verifyKnowledge(j, simulation, root.id, branch);
+     events.push({ type: 'world.causal_branch_selected', causes: [`causal-chain:${chain.id}`, `root-event:${root.id}`], causalLinks: [root.id], payload: { chainId: chain.id, rootEventId: root.id, branch, step: chain.step } });
+-    if (chain.step >= 3 || (root.severity <= 1 && (branch === 'deescalate' || branch === 'suppress'))) {
++    if (chain.step >= pace.steps || (root.severity <= 1 && (branch === 'deescalate' || branch === 'suppress'))) {
+       chain.active = false; root.active = false;
+       events.push({ type: 'world.causal_chain_completed', causes: [`causal-chain:${chain.id}:completion`, `root-event:${root.id}`], causalLinks: [root.id], payload: { chainId: chain.id, rootEventId: root.id, branch } });
+     }
+diff --git a/src/engine/jianghuInformationV4.ts b/src/engine/jianghuInformationV4.ts
+index ae2415e..4c6809c 100644
+--- a/src/engine/jianghuInformationV4.ts
++++ b/src/engine/jianghuInformationV4.ts
+@@ -1,4 +1,5 @@
+ import type { SimulationState, StateEvent } from './types';
++import { chainPace } from './jianghu';
+ import type { JianghuState, KnowledgeRecord, CausalChainState, NPCState, RumorState } from './jianghu';
+ 
+ const clamp = (v: number, min = 0, max = 100) => Math.max(min, Math.min(max, v));
+@@ -108,7 +109,7 @@ export function processInformation(
+   return { jianghu: j, events };
+ }
+ 
+-function ensureChain(j: JianghuState, eventId: string, kind: CausalChainState['kind'], description: string, turn: number): CausalChainState {
++function ensureChain(j: JianghuState, eventId: string, kind: CausalChainState['kind'], description: string, turn: number, interval = 1): CausalChainState {
+   // Match completed chains too: a finished chain must not respawn (duplicate id, repeated step-1 effects) while its event stays active.
+   const existing = j.causalChains?.find(c => c.rootEventId === eventId);
+   if (existing) return existing;
+@@ -121,7 +122,7 @@ function ensureChain(j: JianghuState, eventId: string, kind: CausalChainState['k
+     sourceIds: [eventId],
+     active: true,
+     createdTurn: turn,
+-    nextCheckTurn: turn + 1,
++    nextCheckTurn: turn + interval,
+   };
+   j.causalChains = [...(j.causalChains ?? []), chain];
+   return chain;
+@@ -144,12 +145,13 @@ export function advanceCausalChains(
+     if (worldEvent.kind === 'conflict' || worldEvent.kind === 'political') kind = 'faction';
+     if (worldEvent.kind === 'market') kind = 'economic';
+     if (worldEvent.kind === 'rumor') kind = 'information';
+-    const chain = ensureChain(j, worldEvent.id, kind, worldEvent.description, turn);
++    const pace = chainPace(worldEvent);
++    const chain = ensureChain(j, worldEvent.id, kind, worldEvent.description, turn, pace.interval);
+     if (!chain.active || chain.nextCheckTurn > turn) continue;
+ 
+     chain.step += 1;
+     chain.sourceIds.push(`turn-${turn}`);
+-    chain.nextCheckTurn = turn + 1;
++    chain.nextCheckTurn = turn + pace.interval;
+ 
+     if (chain.step === 1 && kind === 'information') {
+       worldEvent.severity = clamp(worldEvent.severity + 1, 1, 5);
+@@ -164,9 +166,24 @@ export function advanceCausalChains(
+         for (const good of Object.keys(market.scarcity)) market.scarcity[good] = clamp(market.scarcity[good] + worldEvent.severity * 2);
+       }
+     } else if (chain.step >= 2) {
+-      const nearby = j.npcs.filter(n => n.alive && n.locationId === simulation.character.locationId);
+-      for (const npc of nearby) {
+-        npc.disposition = clamp(npc.disposition - (kind === 'faction' ? 1 : 0), -100, 100);
++      // Local mood erosion keeps its original two-stage bound (stages 2 and 3), however long the chain runs.
++      if (chain.step <= 3) {
++        const nearby = j.npcs.filter(n => n.alive && n.locationId === simulation.character.locationId);
++        for (const npc of nearby) {
++          npc.disposition = clamp(npc.disposition - (kind === 'faction' ? 1 : 0), -100, 100);
++        }
++      }
++      // Slow-burn chains keep building pressure on every middle stage (bounded by `steps` <= 12).
++      if (pace.custom && chain.step < pace.steps) {
++        if (kind === 'faction') {
++          for (const factionId of worldEvent.factionIds) {
++            const faction = j.factions.find(f => f.id === factionId);
++            if (faction) faction.internalTension = clamp(faction.internalTension + worldEvent.severity, 0, 100);
++          }
++        } else if (kind === 'economic') {
++          const market = j.markets?.find(m => m.locationId === worldEvent.locationId);
++          if (market) for (const good of Object.keys(market.scarcity)) market.scarcity[good] = clamp(market.scarcity[good] + worldEvent.severity);
++        }
+       }
+     }
+ 
+@@ -175,7 +192,7 @@ export function advanceCausalChains(
+       causes: [`causal-chain:${chain.id}`, `root-event:${chain.rootEventId}`], causalLinks: [chain.rootEventId], payload: { chainId: chain.id, rootEventId: chain.rootEventId, step: chain.step, kind: chain.kind },
+     });
+ 
+-    if (chain.step >= 3 || !worldEvent.active) {
++    if (chain.step >= pace.steps || !worldEvent.active) {
+       chain.active = false;
+       events.push({
+         type: 'world.causal_chain_completed',
+diff --git a/src/services/llmService.ts b/src/services/llmService.ts
+index e227e63..dabca36 100644
+--- a/src/services/llmService.ts
++++ b/src/services/llmService.ts
+@@ -1,4 +1,5 @@
+ import { LLMConfig, GameTurn, Character, GameState, GameChoice } from '../types/game';
++import { parseNarration } from '../ai/validateNarration';
+ 
+ export interface LLMResponse {
+   narrative: string;
+@@ -238,41 +239,33 @@ async function callCustomEndpoint(config: LLMConfig, messages: { role: string; c
+   return JSON.stringify(data);
+ }
+ 
+-function parseLLMResponse(raw: string): LLMResponse {
+-  // Try to extract JSON from the response
+-  let jsonStr = raw;
+-  
+-  // Try to find JSON block
+-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+-  if (jsonMatch) {
+-    jsonStr = jsonMatch[0];
+-  }
+-  
+-  try {
+-    const parsed = JSON.parse(jsonStr);
+-    return {
+-      narrative: parsed.narrative || 'The story continues...',
+-      choices: parsed.choices || generateFallbackChoices(),
+-      stateUpdates: parsed.stateUpdates || {},
+-    };
+-  } catch {
+-    // If JSON parsing fails, treat the whole response as narrative
+-    return {
+-      narrative: raw.substring(0, 500),
+-      choices: generateFallbackChoices(),
+-      stateUpdates: {},
+-    };
++async function callProvider(config: LLMConfig, messages: Array<{ role: string; content: string }>): Promise<string> {
++  switch (config.provider) {
++    case 'openai':
++      return callOpenAI(config, messages);
++    case 'ollama':
++      return callOllama(config, messages);
++    case 'lmstudio':
++      return callLMStudio(config, messages);
++    case 'custom':
++      return callCustomEndpoint(config, messages);
++    default:
++      throw new Error(`Unknown provider: ${config.provider}`);
+   }
+ }
+ 
+-function generateFallbackChoices(): GameChoice[] {
+-  return [
+-    { id: 1, text: 'Look around carefully', risk: 'low' },
+-    { id: 2, text: 'Proceed forward cautiously', risk: 'medium' },
+-    { id: 3, text: 'Search for hidden paths', risk: 'low' },
+-    { id: 4, text: 'Call out to see if anyone is nearby', risk: 'medium' },
+-    { id: 5, text: 'Prepare for potential danger', risk: 'high' },
+-  ];
++/**
++ * Call the model and validate its output at the AI boundary (src/ai/validateNarration.ts).
++ * Repairs are logged; if no usable narrative can be recovered the call is retried once.
++ */
++async function narrate(config: LLMConfig, messages: Array<{ role: string; content: string }>): Promise<LLMResponse> {
++  let validation = parseNarration(await callProvider(config, messages));
++  if (validation.narrativeIsFallback) {
++    console.warn('Narrator output unusable, retrying once:', validation.issues);
++    validation = parseNarration(await callProvider(config, messages));
++  }
++  if (validation.issues.length) console.warn('Narrator output repaired:', validation.issues);
++  return validation.result;
+ }
+ 
+ export async function generateNarrative(
+@@ -287,26 +280,7 @@ export async function generateNarrative(
+     { role: 'user', content: contextPrompt },
+   ];
+ 
+-  let rawResponse: string;
+-
+-  switch (config.provider) {
+-    case 'openai':
+-      rawResponse = await callOpenAI(config, messages);
+-      break;
+-    case 'ollama':
+-      rawResponse = await callOllama(config, messages);
+-      break;
+-    case 'lmstudio':
+-      rawResponse = await callLMStudio(config, messages);
+-      break;
+-    case 'custom':
+-      rawResponse = await callCustomEndpoint(config, messages);
+-      break;
+-    default:
+-      throw new Error(`Unknown provider: ${config.provider}`);
+-  }
+-
+-  return parseLLMResponse(rawResponse);
++  return narrate(config, messages);
+ }
+ 
+ export async function generateCharacterIntro(
+@@ -321,35 +295,16 @@ export async function generateCharacterIntro(
+       role: 'user', 
+       content: `Begin a new adventure for this character in a ${worldTheme} setting:
+       
+-Character: ${character.name}, a level 1 ${character.race} ${character.class}.
++${character.originId ? `Character: ${character.name}, a ${character.class} (Wuxia origin).` : `Character: ${character.name}, a level 1 ${character.race} ${character.class}.`}
+ Background: ${character.background}
+-Stats: STR ${character.stats.strength}, AGI ${character.stats.agility}, INT ${character.stats.intelligence}, CHA ${character.stats.charisma}, LCK ${character.stats.luck}
+-Starting equipment: ${character.inventory.map(i => i.name).join(', ') || 'Nothing'}
++${character.originId ? '' : `Stats: STR ${character.stats.strength}, AGI ${character.stats.agility}, INT ${character.stats.intelligence}, CHA ${character.stats.charisma}, LCK ${character.stats.luck}
++`}Starting equipment: ${character.inventory.map(i => i.name).join(', ') || 'Nothing'}
+ ${scenario ? `\nAuthored starting scenario (do not contradict it, do not change the location, do not invent new named factions or people; the player's five choices are supplied separately, so "choices" may be an empty array):\n${scenario}\n` : ''}
+ Create an engaging opening scene that introduces the character to the world. Set the mood, describe the surroundings, and present an initial situation that the character must respond to. Respond in valid JSON format.` 
+     },
+   ];
+ 
+-  let rawResponse: string;
+-
+-  switch (config.provider) {
+-    case 'openai':
+-      rawResponse = await callOpenAI(config, messages);
+-      break;
+-    case 'ollama':
+-      rawResponse = await callOllama(config, messages);
+-      break;
+-    case 'lmstudio':
+-      rawResponse = await callLMStudio(config, messages);
+-      break;
+-    case 'custom':
+-      rawResponse = await callCustomEndpoint(config, messages);
+-      break;
+-    default:
+-      throw new Error(`Unknown provider: ${config.provider}`);
+-  }
+-
+-  return parseLLMResponse(rawResponse);
++  return narrate(config, messages);
+ }
+ 
+ export async function testConnection(config: LLMConfig): Promise<{ success: boolean; message: string }> {
+diff --git a/src/world/content/jianghuSeed.ts b/src/world/content/jianghuSeed.ts
+index d2d30ec..9acf98f 100644
+--- a/src/world/content/jianghuSeed.ts
++++ b/src/world/content/jianghuSeed.ts
+@@ -178,13 +178,13 @@ export const RUMORS: Array<Omit<RumorState, 'createdTurn'> & { fantasy?: boolean
+ export const WORLD_EVENTS: WorldEventState[] = [
+   { id: 'event-toll-dispute', kind: 'conflict', title: 'The Ferry Toll Dispute',
+     description: 'Jade Hall couriers and the Black River argue over the Lantern Ferry toll; tempers are rising.',
+-    locationId: 'Lantern Ferry', factionIds: ['faction-jade-hall', 'faction-black-river'], severity: 2, active: true, createdTurn: 0 },
++    locationId: 'Lantern Ferry', factionIds: ['faction-jade-hall', 'faction-black-river'], severity: 2, active: true, createdTurn: 0, pace: { steps: 5, interval: 4 } },
+   { id: 'event-fever-season', kind: 'natural', title: 'Fever Season in Willow Market',
+     description: 'A river fever is spreading through the market town; medicine prices are climbing.',
+-    locationId: 'Willow Market Town', factionIds: ['faction-willow-guild'], severity: 2, active: true, createdTurn: 0, expiresTurn: 30 },
++    locationId: 'Willow Market Town', factionIds: ['faction-willow-guild'], severity: 2, active: true, createdTurn: 0, expiresTurn: 30, pace: { steps: 4, interval: 6 } },
+   { id: 'event-autumn-assembly', kind: 'political', title: 'The Autumn Assembly Approaches',
+     description: 'Jade Hall must name an heir before the autumn assembly; rival disciples are positioning themselves.',
+-    locationId: 'Jade Hall', factionIds: ['faction-jade-hall'], severity: 3, active: true, createdTurn: 0, expiresTurn: 60 },
++    locationId: 'Jade Hall', factionIds: ['faction-jade-hall'], severity: 3, active: true, createdTurn: 0, expiresTurn: 60, pace: { steps: 6, interval: 8 } },
+ ];
+ 
+ /** Stock 20 is "no scarcity" in the v3 price model; lower stock raises scarcity and price. */
+diff --git a/test/simulation/pacing.test.ts b/test/simulation/pacing.test.ts
+new file mode 100644
+index 0000000..7aef982
+--- /dev/null
++++ b/test/simulation/pacing.test.ts
+@@ -0,0 +1,110 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
++import { chainPace, createDefaultJianghu, tickJianghu, type JianghuState, type WorldEventState } from '../../src/engine/jianghu';
++import { advanceCausalChains } from '../../src/engine/jianghuInformationV4';
++import { advanceCausalityV5 } from '../../src/engine/jianghuCausalityV5';
++import { resolveAction } from '../../src/engine/resolveAction';
++import type { SimulationState } from '../../src/engine/types';
++import { validateState } from '../../src/engine/validateState';
++import { createWuxiaSimulation } from '../../src/world/content';
++
++function sim(turn: number): SimulationState {
++  return {
++    schemaVersion: 1, ledger: [],
++    character: { id: 'player', name: 'T', hp: 100, maxHp: 100, qi: 50, maxQi: 50, fatigue: 0,
++      attributes: { strength: 10, agility: 10, constitution: 10, perception: 10, intelligence: 10, charisma: 10, luck: 10 },
++      conditions: [], inventory: [], locationId: 'The Crossroads' },
++    world: { turn, locationIds: ['The Crossroads'], knownFacts: [], knownRumorIds: [], knownNpcIds: [] },
++  };
++}
++const event = (extra: Partial<WorldEventState> = {}): WorldEventState => ({
++  id: 'ev', kind: 'conflict', title: 't', description: 'd', factionIds: ['faction-jade-hall'], severity: 2,
++  active: true, createdTurn: 1, locationId: 'The Crossroads', ...extra,
++});
++function run(j: JianghuState, from: number, to: number) {
++  const advancedOn: number[] = []; const completedOn: number[] = [];
++  for (let t = from; t <= to; t++) {
++    const r = advanceCausalChains(j, sim(t)); j = r.jianghu;
++    if (r.events.some(e => e.type === 'world.causal_chain_advanced')) advancedOn.push(t);
++    if (r.events.some(e => e.type === 'world.causal_chain_completed')) completedOn.push(t);
++  }
++  return { j, advancedOn, completedOn };
++}
++
++test('chainPace defaults to the original 3 stages one turn apart and clamps extremes', () => {
++  assert.deepStrictEqual(chainPace({}), { steps: 3, interval: 1, custom: false });
++  assert.deepStrictEqual(chainPace({ pace: { steps: 999, interval: 0 } }), { steps: 12, interval: 1, custom: true });
++  assert.deepStrictEqual(chainPace({ pace: { steps: -4, interval: 99 } }), { steps: 1, interval: 20, custom: true });
++});
++
++test('events without a pace behave exactly as before: 3 consecutive stages', () => {
++  const j = createDefaultJianghu(); j.worldEvents.push(event());
++  const out = run(j, 5, 14);
++  assert.deepStrictEqual(out.advancedOn, [6, 7, 8]);
++  assert.deepStrictEqual(out.completedOn, [8]);
++});
++
++test('a paced chain advances once per interval and completes exactly after its last stage', () => {
++  const j = createDefaultJianghu(); j.worldEvents.push(event({ pace: { steps: 4, interval: 5 } }));
++  const out = run(j, 1, 60);
++  assert.deepStrictEqual(out.advancedOn, [6, 11, 16, 21]);
++  assert.deepStrictEqual(out.completedOn, [21]);
++  const chains = out.j.causalChains!.filter(c => c.rootEventId === 'ev');
++  assert.equal(chains.length, 1);
++  assert.equal(chains[0].active, false);
++});
++
++test('middle stages of a paced faction chain keep raising tension, bounded at 100', () => {
++  const j = createDefaultJianghu(); j.worldEvents.push(event({ severity: 5, pace: { steps: 12, interval: 1 } }));
++  const before = j.factions.find(f => f.id === 'faction-jade-hall')!.internalTension;
++  const out = run(j, 1, 40);
++  const after = out.j.factions.find(f => f.id === 'faction-jade-hall')!.internalTension;
++  assert.ok(after > before && after <= 100, `${before} -> ${after}`);
++  assert.equal(out.j.causalChains!.find(c => c.rootEventId === 'ev')!.step, 12);
++});
++
++test('V5 honours the same pace for cadence and completion', () => {
++  const j = createDefaultJianghu();
++  j.worldEvents.push(event({ severity: 4, pace: { steps: 2, interval: 6 } }));
++  j.causalChains!.push({ id: 'c', rootEventId: 'ev', step: 0, kind: 'faction', description: 'd', sourceIds: ['ev'], active: true, createdTurn: 1, nextCheckTurn: 1 });
++  const first = advanceCausalityV5(j, sim(1));
++  assert.equal(first.jianghu.causalChains![0].nextCheckTurn, 7);
++  assert.equal(first.jianghu.causalChains![0].active, true);
++  const second = advanceCausalityV5(first.jianghu, sim(7));
++  assert.equal(second.jianghu.causalChains![0].active, false);
++});
++
++test('faction tension no longer drains every turn: it holds during an active event and cools slowly otherwise', () => {
++  const j = createDefaultJianghu();
++  const faction = j.factions.find(f => f.id === 'faction-jade-hall')!;
++  faction.internalTension = 40;
++  j.worldEvents = [event()];
++  let cur = j;
++  for (let t = 1; t <= 12; t++) cur = tickJianghu(cur, sim(t)).jianghu;
++  assert.equal(cur.factions.find(f => f.id === 'faction-jade-hall')!.internalTension, 40);
++  cur.worldEvents = [];
++  for (let t = 13; t <= 24; t++) cur = tickJianghu(cur, sim(t)).jianghu;
++  assert.equal(cur.factions.find(f => f.id === 'faction-jade-hall')!.internalTension, 36);
++});
++
++test('authored seed events unfold on their authored timescale and stay valid for 70 turns', () => {
++  let state = createWuxiaSimulation('origin-disgraced-disciple');
++  const completed: Record<string, number> = {}; const firstStage: Record<string, number> = {};
++  for (let t = 1; t <= 70; t++) {
++    const action = interpretPlayerAction(t % 3 ? 'Rest' : 'Meditate quietly', state, 'low');
++    const r = resolveAction(state, action, 60);
++    for (const e of r.events) {
++      const id = String(e.payload.rootEventId);
++      if (e.type === 'world.causal_chain_advanced') firstStage[id] ??= t;
++      if (e.type === 'world.causal_chain_completed') completed[id] = t;
++    }
++    state = r.state;
++    assert.deepStrictEqual(validateState(state), [], `turn ${t}`);
++    for (const f of state.jianghu!.factions) assert.ok(f.internalTension >= 0 && f.internalTension <= 100);
++  }
++  assert.ok(firstStage['event-toll-dispute'] >= 4, 'toll dispute should not escalate in the first few turns');
++  assert.ok(completed['event-toll-dispute'] >= 16, `toll dispute resolved too fast: ${completed['event-toll-dispute']}`);
++  assert.ok(completed['event-autumn-assembly'] >= 40, `assembly resolved too fast: ${completed['event-autumn-assembly']}`);
++  assert.ok(state.jianghu!.factions.find(f => f.id === 'faction-jade-hall')!.internalTension > 25, 'Jade Hall tension should persist');
++});
+diff --git a/test/simulation/validate-narration.test.ts b/test/simulation/validate-narration.test.ts
+new file mode 100644
+index 0000000..39b27ea
+--- /dev/null
++++ b/test/simulation/validate-narration.test.ts
+@@ -0,0 +1,110 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import {
++  CHOICE_COUNT, MAX_CHOICE_CHARS, MAX_NARRATIVE_CHARS, NARRATIVE_FALLBACK, balancedObjects, parseNarration,
++} from '../../src/ai/validateNarration';
++
++const good = {
++  narrative: 'Rain taps the tea house roof.',
++  choices: [
++    { id: 1, text: 'Talk to the tea keeper', risk: 'low' }, { id: 2, text: 'Read the notice wall', risk: 'low' },
++    { id: 3, text: 'Travel to Lantern Ferry', risk: 'medium' }, { id: 4, text: 'Rest', risk: 'low' },
++    { id: 5, text: 'Watch the road', risk: 'high' },
++  ],
++  stateUpdates: {},
++};
++
++test('clean output passes untouched with no issues', () => {
++  const v = parseNarration(JSON.stringify(good));
++  assert.deepStrictEqual(v.issues, []);
++  assert.equal(v.result.narrative, good.narrative);
++  assert.deepStrictEqual(v.result.choices, good.choices);
++});
++
++test('JSON wrapped in prose or code fences is extracted; braces inside strings do not confuse it', () => {
++  const tricky = { ...good, narrative: 'He said "run {now}" and drew a } blade.' };
++  for (const raw of ['Here you go:\n```json\n' + JSON.stringify(tricky) + '\n```\nEnjoy!', 'noise {not json} then ' + JSON.stringify(tricky)]) {
++    const v = parseNarration(raw);
++    assert.equal(v.result.narrative, tricky.narrative);
++    assert.equal(v.narrativeIsFallback, false);
++  }
++  assert.deepStrictEqual(balancedObjects('a {"x":"}"} b {"y":1}'), ['{"x":"}"}', '{"y":1}']);
++});
++
++test('the old greedy regex failure case (two objects) now picks the narration object', () => {
++  const v = parseNarration('{"note":"ignore"}\n' + JSON.stringify(good) + '\n{"trailing":true}');
++  assert.equal(v.result.narrative, good.narrative);
++});
++
++test('state updates are stripped; only a known locationChange survives', () => {
++  const raw = JSON.stringify({ ...good, stateUpdates: { hpChange: 999, goldChange: 1e6, itemsGained: ['Sword of Ten Thousand Truths'], skillsGained: ['everything'], locationChange: 'Lantern Ferry' } });
++  const open = parseNarration(raw);
++  assert.deepStrictEqual(open.result.stateUpdates, { locationChange: 'Lantern Ferry' });
++  assert.ok(open.issues.some(i => i.includes('state updates ignored') && i.includes('hpChange')));
++  const strict = parseNarration(raw, { allowedLocationIds: ['The Crossroads'] });
++  assert.deepStrictEqual(strict.result.stateUpdates, {});
++  assert.ok(strict.issues.some(i => i.includes('not a known location')));
++  assert.deepStrictEqual(parseNarration(JSON.stringify({ ...good, stateUpdates: { locationChange: 42 } })).result.stateUpdates, {});
++});
++
++test('choices are normalised: renumbered, risk repaired, deduped, trimmed, capped and padded to five', () => {
++  const messy = { narrative: 'x', choices: [
++    { id: 9, text: '  Talk   to\nthe keeper ', risk: 'LOW' }, { id: 9, text: 'talk to the keeper', risk: 'low' },
++    'Plain string choice', { text: 'Bad risk', risk: 'extreme' }, { text: '' }, { risk: 'low' }, null, 7,
++    { text: 'a'.repeat(500), risk: 'high' }, { text: 'Seventh', risk: 'low' }, { text: 'Eighth', risk: 'low' },
++  ] };
++  const v = parseNarration(JSON.stringify(messy));
++  assert.equal(v.result.choices.length, CHOICE_COUNT);
++  assert.deepStrictEqual(v.result.choices.map(c => c.id), [1, 2, 3, 4, 5]);
++  assert.equal(v.result.choices[0].text, 'Talk to the keeper');
++  assert.equal(v.result.choices[0].risk, 'low');
++  assert.equal(v.result.choices[2].risk, 'medium');
++  assert.ok(v.result.choices.every(c => c.text.length <= MAX_CHOICE_CHARS && ['low', 'medium', 'high'].includes(c.risk)));
++  assert.equal(new Set(v.result.choices.map(c => c.text.toLowerCase())).size, CHOICE_COUNT);
++});
++
++test('missing, empty or malformed choices are padded with distinct stock choices', () => {
++  for (const choices of [undefined, [], 'nope', { a: 1 }, [{ text: 'Only one' }]]) {
++    const v = parseNarration(JSON.stringify({ narrative: 'x', choices }));
++    assert.equal(v.result.choices.length, CHOICE_COUNT);
++    assert.equal(new Set(v.result.choices.map(c => c.text.toLowerCase())).size, CHOICE_COUNT);
++  }
++});
++
++test('narrative recovery: plain prose, truncated JSON, wrong types, and total garbage', () => {
++  const prose = parseNarration('The wind turns cold over the pass.');
++  assert.equal(prose.result.narrative, 'The wind turns cold over the pass.');
++  assert.equal(prose.narrativeIsFallback, false);
++
++  const truncated = parseNarration('{"narrative": "The bell tolls once, and then he saw it, \\"a shadow\\" on the wall');
++  assert.ok(truncated.result.narrative.startsWith('The bell tolls once'));
++  assert.equal(truncated.narrativeIsFallback, false);
++
++  for (const raw of ['{"narrative": 42}', '{"narrative": ""}', '{"narrative": null, "choices": []}', '{}', '', '   ', '{"a":']) {
++    const v = parseNarration(raw);
++    assert.equal(v.narrativeIsFallback, true, raw);
++    assert.equal(v.result.narrative, NARRATIVE_FALLBACK);
++    assert.equal(v.result.choices.length, CHOICE_COUNT);
++  }
++});
++
++test('overlong narrative is cut at a sentence boundary', () => {
++  const long = 'The river runs on. '.repeat(400);
++  const v = parseNarration(JSON.stringify({ narrative: long, choices: [] }));
++  assert.ok(v.result.narrative.length <= MAX_NARRATIVE_CHARS);
++  assert.ok(v.result.narrative.endsWith('.'));
++  assert.ok(v.issues.some(i => i.includes('truncated')));
++});
++
++test('the validator is total: random junk never throws and always yields a playable result', () => {
++  const junk = ['{', '}', '"', '\\', '{"narrative"', '[]', 'null', '{"narrative":{"a":1}}', '{"narrative":"ok","choices":{"0":"a"}}',
++    '```', '{"narrative":"x","stateUpdates":"boom"}', '{"narrative":"x","stateUpdates":[1,2]}', '\u0000\u2028', '{"narrative":"x","choices":[[],{}, {"text":{}}]}'];
++  let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
++  for (let i = 0; i < 500; i++) {
++    const raw = Array.from({ length: 1 + Math.floor(rnd() * 6) }, () => junk[Math.floor(rnd() * junk.length)]).join(rnd() < 0.5 ? '' : ' ');
++    const v = parseNarration(raw);
++    assert.ok(v.result.narrative.length > 0 && v.result.narrative.length <= MAX_NARRATIVE_CHARS);
++    assert.equal(v.result.choices.length, CHOICE_COUNT);
++    assert.deepStrictEqual(Object.keys(v.result.stateUpdates).filter(k => k !== 'locationChange'), []);
++  }
++});
