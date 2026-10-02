@@ -3,8 +3,8 @@ import { useGameStore } from './store/gameStore';
 import CharacterCreation from './components/CharacterCreation';
 import GameScreen from './components/GameScreen';
 import SettingsPanel from './components/SettingsPanel';
-import WelcomeScreen from './components/WelcomeScreen';
 import MainMenu from './components/MainMenu';
+import SaveLoadModal from './components/SaveLoadModal';
 import Tutorial from './components/Tutorial';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
 import AutoSaveIndicator from './components/AutoSaveIndicator';
@@ -13,13 +13,15 @@ import DeathScreen from './components/DeathScreen';
 import CommandPalette, { useCommandPalette } from './components/CommandPalette';
 import { Settings } from 'lucide-react';
 
-type AppView = 'main-menu' | 'welcome' | 'character-creation' | 'game' | 'settings';
+type AppView = 'main-menu' | 'character-creation' | 'game' | 'settings';
 
 export default function App() {
   const { gameState, activeTab, setActiveTab, tutorialCompleted, completeTutorial, lastAutoSave, isAutoSaving, autoSave, saveSlots } = useGameStore();
   const [view, setView] = useState<AppView>(
     gameState.isGameStarted ? 'game' : 'main-menu'
   );
+  const [viewBeforeSettings, setViewBeforeSettings] = useState<AppView>('main-menu');
+  const [showTitleLoad, setShowTitleLoad] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
 
   const handleMainMenuNewGame = () => {
@@ -33,7 +35,7 @@ export default function App() {
   };
 
   const handleMainMenuLoad = () => {
-    setView('welcome');
+    setShowTitleLoad(true);
   };
 
   // Show tutorial for new players
@@ -50,10 +52,6 @@ export default function App() {
     }
   }, [gameState.turnCount, gameState.isGameStarted, autoSave]);
 
-  const handleStartAdventure = () => {
-    setView('character-creation');
-  };
-
   const handleDemo = () => {
     setView('character-creation');
     // Demo mode will be handled in the game store
@@ -61,11 +59,12 @@ export default function App() {
   };
 
   const handleOpenSettings = () => {
+    setViewBeforeSettings(view);
     setView('settings');
   };
 
   const handleCloseSettings = () => {
-    setView(gameState.isGameStarted ? 'game' : 'welcome');
+    setView(gameState.isGameStarted ? 'game' : viewBeforeSettings);
   };
 
   // Settings view
@@ -86,41 +85,25 @@ export default function App() {
   // Main Menu
   if (view === 'main-menu') {
     return (
-      <MainMenu
-        hasSaveData={gameState.isGameStarted || saveSlots.length > 0}
-        onNewGame={handleMainMenuNewGame}
-        onContinue={handleMainMenuContinue}
-        onLoadGame={handleMainMenuLoad}
-        onSettings={handleOpenSettings}
-        onAchievements={() => {}}
-        onDatabase={() => {}}
-        stats={{
-          totalPlayTime: Math.floor((Date.now() - (gameState as any).sessionStartTime || Date.now()) / 1000),
-          totalGamesPlayed: saveSlots.length,
-          highestLevel: gameState.character?.level || 1,
-          totalAchievements: 0,
-        }}
-      />
-    );
-  }
-
-  // Welcome screen
-  if (view === 'welcome') {
-    return (
-      <div className="relative">
-        <WelcomeScreen
-          onStart={handleStartAdventure}
+      <>
+        <MainMenu
+          hasSaveData={gameState.isGameStarted || saveSlots.length > 0}
+          onNewGame={handleMainMenuNewGame}
+          onContinue={handleMainMenuContinue}
+          onLoadGame={handleMainMenuLoad}
           onSettings={handleOpenSettings}
           onDemo={handleDemo}
         />
-        <button
-          onClick={handleOpenSettings}
-          className="fixed bottom-4 right-4 bg-gray-800 border border-gray-700 hover:border-amber-500 text-gray-400 hover:text-amber-400 p-3 rounded-full transition-all shadow-lg z-50"
-          title="Settings"
-        >
-          <Settings className="w-5 h-5" />
-        </button>
-      </div>
+        {showTitleLoad && (
+          <SaveLoadModal
+            initialMode="load"
+            allowSave={false}
+            themeWuxia
+            onClose={() => setShowTitleLoad(false)}
+            onLoaded={() => { setShowTitleLoad(false); setView('game'); }}
+          />
+        )}
+      </>
     );
   }
 
@@ -145,12 +128,12 @@ export default function App() {
   const { isDead, gameState: currentGameState, resetGame, revive } = useGameStore();
 
   const commandPaletteCommands = [
-    { id: 'save', label: 'Save Game', icon: '💾', category: 'Game', description: 'Save your current progress', action: () => {} },
+    { id: 'save', label: 'Quick Save', icon: '💾', category: 'Game', description: 'Save your current journey', action: () => useGameStore.getState().saveGame('Quick Save') },
     { id: 'settings', label: 'Open Settings', icon: '⚙️', category: 'Game', description: 'Configure AI and preferences', action: () => setActiveTab('settings') },
-    { id: 'character', label: 'View Character', icon: '🧙', category: 'Game', description: 'View your character sheet', action: () => setActiveTab('character') },
-    { id: 'inventory', label: 'View Inventory', icon: '🎒', category: 'Game', description: 'Check your items', action: () => setActiveTab('inventory') },
-    { id: 'quests', label: 'View Quests', icon: '📋', category: 'Game', description: 'Check your quest log', action: () => setActiveTab('quests') },
-    { id: 'new-game', label: 'New Game', icon: '🎮', category: 'Game', description: 'Start a new adventure', action: () => resetGame() },
+    { id: 'character', label: gameState.character?.originId ? 'Cultivation Record' : 'View Character', icon: '🧘', category: 'Game', description: 'View your character sheet', action: () => setActiveTab('character') },
+    { id: 'inventory', label: gameState.character?.originId ? 'View Possessions' : 'View Inventory', icon: '🎒', category: 'Game', description: 'Check your items', action: () => setActiveTab('inventory') },
+    { id: 'quests', label: gameState.character?.originId ? 'View Jianghu Ledger' : 'View Quests', icon: '📋', category: 'Game', description: 'Review local events and known ties', action: () => setActiveTab('quests') },
+    { id: 'new-game', label: 'New Journey', icon: '🎮', category: 'Game', description: 'Start a new adventure', action: () => resetGame() },
   ];
 
   return (
@@ -158,6 +141,7 @@ export default function App() {
       {/* Tutorial */}
       {showTutorial && (
         <Tutorial
+          wuxia={Boolean(gameState.character?.originId)}
           onComplete={() => {
             setShowTutorial(false);
             completeTutorial();
@@ -243,6 +227,66 @@ export default function App() {
 function CharacterPanel() {
   const { gameState, setActiveTab } = useGameStore();
   const character = gameState.character!;
+  const simulation = gameState.simulation;
+  const wuxia = character.originId ? simulation?.character.wuxia : undefined;
+
+  if (wuxia && simulation) {
+    const simCharacter = simulation.character;
+    const attributes = [
+      ['Strength', simCharacter.attributes.strength], ['Agility', simCharacter.attributes.agility],
+      ['Constitution', simCharacter.attributes.constitution], ['Perception', simCharacter.attributes.perception],
+      ['Intelligence', simCharacter.attributes.intelligence], ['Charisma', simCharacter.attributes.charisma], ['Luck', simCharacter.attributes.luck],
+    ];
+    return (
+      <div className="jianghu-overlay fixed inset-0 z-50 overflow-y-auto p-4 md:p-8">
+        <button onClick={() => setActiveTab('narrative')} className="fixed right-4 top-4 z-50 border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-200 hover:border-emerald-300">Close</button>
+        <div className="mx-auto max-w-3xl">
+          <p className="jianghu-eyebrow">NINE RIVERS JIANGHU · TURN {simulation.world.turn}</p>
+          <h1 className="mb-1 font-[var(--font-display)] text-3xl text-stone-100">Cultivation record</h1>
+          <p className="mb-7 text-sm text-gray-400">{character.name} · {character.class} · {simCharacter.locationId}</p>
+
+          <section className="jianghu-sheet-section">
+            <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
+              <WuxiaMeter label="Health" value={simCharacter.hp} max={simCharacter.maxHp} tone="red" />
+              <WuxiaMeter label="Qi" value={simCharacter.qi} max={simCharacter.maxQi} tone="jade" />
+              <WuxiaMeter label="Fatigue" value={simCharacter.fatigue} max={100} tone="brass" />
+              <WuxiaMeter label="Face" value={wuxia.social.face} max={100} tone="cinnabar" />
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-3 border-t border-white/10 pt-4 text-sm sm:grid-cols-4">
+              <div><span className="text-gray-500">Cultivation</span><div className="mt-1 capitalize text-emerald-100">{wuxia.cultivation.stage.replace('_', ' ')}</div></div>
+              <div><span className="text-gray-500">Qi control</span><div className="mt-1 text-stone-100">{wuxia.cultivation.qiControl}/100</div></div>
+              <div><span className="text-gray-500">Meridians</span><div className="mt-1 text-stone-100">{wuxia.cultivation.meridianIntegrity}/100</div></div>
+              <div><span className="text-gray-500">Insight</span><div className="mt-1 text-stone-100">{wuxia.cultivation.accumulatedInsight}</div></div>
+            </div>
+          </section>
+
+          <section className="jianghu-sheet-section">
+            <h2 className="jianghu-sheet-heading">Attributes</h2>
+            <div className="grid grid-cols-2 gap-y-3 sm:grid-cols-4">{attributes.map(([label, value]) => <div key={label} className="flex justify-between pr-5 text-sm"><span className="text-gray-400">{label}</span><strong className="text-stone-100">{value}</strong></div>)}</div>
+          </section>
+
+          <section className="jianghu-sheet-section">
+            <h2 className="jianghu-sheet-heading">Martial arts</h2>
+            {wuxia.martialArts.length ? <div className="divide-y divide-white/10">{wuxia.martialArts.map(art => (
+              <div key={art.id} className="py-4 first:pt-0 last:pb-0">
+                <div className="flex items-baseline justify-between gap-3"><h3 className="font-semibold text-emerald-100">{art.name}</h3><span className="text-sm text-amber-200">Mastery {art.mastery}</span></div>
+                <div className="mt-2 h-1 bg-white/10"><div className="h-full bg-emerald-400" style={{ width: `${art.mastery}%` }} /></div>
+                <ul className="mt-3 grid gap-2 sm:grid-cols-2">{art.techniques.map(technique => {
+                  const available = technique.minMastery === undefined || art.mastery >= technique.minMastery;
+                  return <li key={technique.id} className="flex justify-between gap-3 text-xs"><span className={available ? 'text-gray-200' : 'text-gray-500'}>{technique.name}{!available && ` · mastery ${technique.minMastery} required`}</span><span className="shrink-0 text-cyan-200">{technique.qiCost} Qi</span></li>;
+                })}</ul>
+              </div>
+            ))}</div> : <p className="text-sm text-gray-500">No arts learned yet.</p>}
+          </section>
+
+          <section className="jianghu-sheet-section">
+            <h2 className="jianghu-sheet-heading">Injuries</h2>
+            {wuxia.injuries.length ? <div className="grid gap-3 sm:grid-cols-2">{wuxia.injuries.map(injury => <div key={injury.id} className="border-l-2 border-rose-400/70 pl-3"><div className="text-sm text-rose-100">{injury.bodyRegion.replace(/([A-Z])/g, ' $1').toLowerCase()} · severity {injury.severity}</div><div className="mt-1 text-xs text-gray-400">{injury.healingTurns} turns to heal{injury.untreated ? ' · untreated' : ''}</div></div>)}</div> : <p className="text-sm text-gray-500">No active injuries.</p>}
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-gray-900 overflow-y-auto p-4 md:p-8">
@@ -348,9 +392,15 @@ function CharacterPanel() {
   );
 }
 
+function WuxiaMeter({ label, value, max, tone }: { label: string; value: number; max: number; tone: 'red' | 'jade' | 'brass' | 'cinnabar' }) {
+  const tones = { red: 'bg-rose-500', jade: 'bg-emerald-400', brass: 'bg-amber-300', cinnabar: 'bg-orange-400' };
+  return <div><div className="mb-2 flex justify-between text-xs"><span className="text-gray-400">{label}</span><span className="text-stone-100">{value}/{max}</span></div><div className="h-1.5 bg-white/10"><div className={`h-full ${tones[tone]}`} style={{ width: `${max ? Math.max(0, Math.min(100, value / max * 100)) : 0}%` }} /></div></div>;
+}
+
 function InventoryPanel() {
   const { gameState, setActiveTab } = useGameStore();
   const character = gameState.character!;
+  const isWuxia = Boolean(character.originId && gameState.simulation?.character.wuxia);
 
   const typeIcons: Record<string, string> = {
     weapon: '⚔️',
@@ -369,7 +419,7 @@ function InventoryPanel() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900 overflow-y-auto p-4 md:p-8">
+    <div className={`fixed inset-0 z-50 overflow-y-auto p-4 md:p-8 ${isWuxia ? 'jianghu-overlay' : 'bg-gray-900'}`}>
       <button
         onClick={() => setActiveTab('narrative')}
         className="fixed top-4 right-4 bg-gray-800 border border-gray-700 hover:border-amber-500 text-white p-2 rounded-lg transition-all z-50"
@@ -378,11 +428,11 @@ function InventoryPanel() {
       </button>
       
       <div className="max-w-2xl mx-auto">
-        <h1 className="text-3xl font-bold text-white mb-6">🎒 Inventory</h1>
+        <h1 className="mb-6 text-3xl font-bold text-white">{isWuxia ? 'Carried possessions' : 'Inventory'}</h1>
         
         {character.inventory.length === 0 ? (
           <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-8 text-center">
-            <p className="text-gray-400 text-lg">Your bag is empty.</p>
+            <p className="text-gray-400 text-lg">{isWuxia ? 'You carry nothing.' : 'Your bag is empty.'}</p>
             <p className="text-gray-500 text-sm mt-2">Items will appear here as you find them.</p>
           </div>
         ) : (
@@ -398,8 +448,8 @@ function InventoryPanel() {
                     </div>
                     <p className="text-xs text-gray-400 mt-1">{item.description}</p>
                     <div className="flex justify-between mt-2">
-                      <span className="text-xs text-gray-500 capitalize">{item.type}</span>
-                      <span className="text-xs text-yellow-400">{item.value}g</span>
+                      <span className="text-xs text-gray-500 capitalize">{isWuxia ? item.type === 'misc' ? 'possession' : item.type : item.type}</span>
+                      {!isWuxia && <span className="text-xs text-yellow-400">{item.value}g</span>}
                     </div>
                   </div>
                 </div>
@@ -414,6 +464,50 @@ function InventoryPanel() {
 
 function QuestsPanel() {
   const { gameState, setActiveTab } = useGameStore();
+  const simulation = gameState.simulation;
+
+  if (gameState.character?.originId && simulation?.jianghu) {
+    const locationId = simulation.character.locationId;
+    const playerId = simulation.character.id;
+    const publicEvents = simulation.jianghu.worldEvents.filter(event => event.active && event.locationId === locationId);
+    const knownRumors = simulation.jianghu.rumors.filter(rumor => rumor.knownBy.includes(playerId));
+    const peopleHere = simulation.jianghu.npcs.filter(npc => npc.alive && npc.locationId === locationId);
+    const ties = simulation.jianghu.relationships.filter(relation => relation.subjectId === playerId);
+    const npcById = new Map(simulation.jianghu.npcs.map(npc => [npc.id, npc]));
+
+    return (
+      <div className="jianghu-overlay fixed inset-0 z-50 overflow-y-auto p-4 md:p-8">
+        <button onClick={() => setActiveTab('narrative')} className="fixed right-4 top-4 z-50 border border-gray-600 bg-gray-900 px-3 py-2 text-sm text-gray-200 hover:border-emerald-300">Close</button>
+        <div className="mx-auto max-w-3xl">
+          <p className="jianghu-eyebrow">{locationId.toUpperCase()} · TURN {simulation.world.turn}</p>
+          <h1 className="mb-7 font-[var(--font-display)] text-3xl text-stone-100">Jianghu ledger</h1>
+
+          <section className="jianghu-sheet-section">
+            <h2 className="jianghu-sheet-heading">Public situation here</h2>
+            {publicEvents.length ? <div className="space-y-4">{publicEvents.map(event => <article key={event.id}><h3 className="font-semibold text-amber-100">{event.title}</h3><p className="mt-1 text-sm leading-relaxed text-gray-300">{event.description}</p></article>)}</div> : <p className="text-sm text-gray-500">No pressing public event here.</p>}
+          </section>
+
+          <section className="jianghu-sheet-section">
+            <h2 className="jianghu-sheet-heading">People present</h2>
+            {peopleHere.length ? <div className="grid gap-3 sm:grid-cols-2">{peopleHere.map(npc => <div key={npc.id} className="border-l border-emerald-300/50 pl-3"><h3 className="text-sm font-semibold text-emerald-100">{npc.name}</h3><p className="text-xs text-gray-400">{npc.role}</p></div>)}</div> : <p className="text-sm text-gray-500">No one of note is nearby.</p>}
+          </section>
+
+          <section className="jianghu-sheet-section">
+            <h2 className="jianghu-sheet-heading">Rumors you have heard</h2>
+            {knownRumors.length ? <div className="space-y-3">{knownRumors.map(rumor => <article key={rumor.id} className="border-l border-amber-200/50 pl-3"><p className="text-sm text-gray-200">{rumor.text}</p><p className="mt-1 text-xs capitalize text-gray-500">{rumor.status} · credibility {rumor.credibility}</p></article>)}</div> : <p className="text-sm text-gray-500">No rumors recorded yet.</p>}
+          </section>
+
+          <section className="jianghu-sheet-section">
+            <h2 className="jianghu-sheet-heading">Your ties</h2>
+            {ties.length ? <div className="grid gap-3 sm:grid-cols-2">{ties.map(tie => {
+              const npc = npcById.get(tie.targetId);
+              return npc ? <article key={tie.id} className="text-sm"><h3 className="font-semibold text-stone-100">{npc.name}</h3><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400"><span>Trust {tie.trust}</span><span>Respect {tie.respect}</span><span>Fear {tie.fear}</span><span>Debt {tie.debt}</span></div></article> : null;
+            })}</div> : <p className="text-sm text-gray-500">No personal ties have been recorded yet.</p>}
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-gray-900 overflow-y-auto p-4 md:p-8">

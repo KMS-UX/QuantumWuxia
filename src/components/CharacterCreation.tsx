@@ -35,110 +35,109 @@ export default function CharacterCreation() {
     setIsCreating(false);
   };
 
-  const cardClass = (selected: boolean) =>
-    `p-4 rounded-xl border-2 transition-all text-left ${
-      selected ? 'border-amber-500 bg-amber-500/10' : 'border-gray-700 bg-gray-900/30 hover:border-gray-500'
-    }`;
+  const optionClass = 'jianghu-option';
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-900 via-purple-900/20 to-gray-900 flex items-center justify-center p-4">
-      <div className="max-w-4xl w-full">
-        <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-purple-500 mb-2">
+    <main className="jianghu-creation">
+      <div className="jianghu-creation__frame">
+        <header className="mb-7 text-center">
+          <p className="jianghu-eyebrow">THE NINE RIVERS · CHARACTER ENTRY</p>
+          <h1 className="jianghu-creation__brand">
             QuantumWuxia
           </h1>
-          <p className="text-gray-400 text-lg">An AI-narrated Wuxia simulation in the Nine Rivers Jianghu</p>
-          <p className="text-gray-500 text-sm mt-1">
+          <p className="jianghu-creation__subtitle">An AI-narrated Wuxia simulation in the Nine Rivers Jianghu</p>
+          <p className="mt-2 text-xs text-gray-400">
             LLM: {settings.llmConfig.provider} / {settings.llmConfig.model}
           </p>
-        </div>
+        </header>
 
-        <div className="flex justify-center mb-8 gap-2">
+        <div className="jianghu-steps" aria-label={`Step ${step} of 2`}>
           {[1, 2].map(s => (
-            <div key={s} className={`h-2 w-16 rounded-full transition-all ${s <= step ? 'bg-amber-500' : 'bg-gray-700'}`} />
+            <span key={s} aria-current={s === step ? 'step' : undefined} />
           ))}
         </div>
 
-        <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl p-8 shadow-2xl">
+        <section className="jianghu-creation__panel px-5 py-6 sm:px-8">
           {step === 1 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                <Sparkles className="text-amber-400" /> Name and World
+              <h2 className="jianghu-creation__heading flex items-center gap-2">
+                <Sparkles className="text-amber-300" /> Name and world
               </h2>
               <div>
-                <label className="block text-gray-300 mb-2">Character Name</label>
+                <label className="mb-2 block text-sm text-gray-300">Character name</label>
                 <input
                   type="text"
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  placeholder="Enter your name..."
-                  className="w-full bg-gray-900/50 border border-gray-600 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500 transition-colors"
+                  placeholder="Choose the name you will carry..."
+                  maxLength={48}
+                  className="jianghu-field"
                 />
               </div>
               <div>
-                <label className="block text-gray-300 mb-2">How much of the supernatural?</label>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <label className="mb-2 block text-sm text-gray-300">What is possible in this world?</label>
+                <div className="jianghu-option-grid">
                   {(Object.keys(PRESET_COPY) as PresetId[]).map(id => (
-                    <button key={id} onClick={() => choosePreset(id)} className={cardClass(presetId === id)}>
-                      <div className="font-bold text-white">{PRESET_COPY[id].title}</div>
-                      <div className="text-xs text-gray-400 mt-1">{PRESET_COPY[id].description}</div>
+                    <button key={id} onClick={() => choosePreset(id)} className={optionClass} aria-pressed={presetId === id}>
+                      <div className="jianghu-option__title">{PRESET_COPY[id].title}</div>
+                      <div className="jianghu-option__detail">{PRESET_COPY[id].description}</div>
                     </button>
                   ))}
                 </div>
               </div>
               <button
                 onClick={() => setStep(2)}
-                className="w-full bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold py-3 rounded-lg transition-all"
+                className="jianghu-button jianghu-button--primary w-full"
               >
-                Next: Choose Your Origin →
+                Choose your origin <span aria-hidden="true">→</span>
               </button>
             </div>
           )}
 
           {step === 2 && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                <Sword className="text-blue-400" /> Choose Your Origin
+              <h2 className="jianghu-creation__heading flex items-center gap-2">
+                <Sword className="text-emerald-200" /> Choose your origin
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="jianghu-option-grid jianghu-option-grid--origins">
                 {origins.map(origin => (
-                  <button key={origin.id} onClick={() => setOriginId(origin.id)} className={cardClass(originId === origin.id)}>
-                    <div className="font-bold text-white">
+                  <button key={origin.id} onClick={() => setOriginId(origin.id)} className="jianghu-option" aria-pressed={originId === origin.id}>
+                    <div className="jianghu-option__title">
                       {origin.title} <span className="text-gray-500 font-normal">{origin.zh}</span>
                     </div>
-                    <div className="text-xs text-gray-400 mt-1">{origin.summary}</div>
-                    <div className="text-xs text-amber-400 mt-2">{origin.startLocationId}</div>
+                    <div className="jianghu-option__detail">{origin.summary}</div>
+                    <div className="mt-2 text-xs text-emerald-200">{origin.startLocationId}</div>
                   </button>
                 ))}
               </div>
-              <div className="bg-gray-900/50 rounded-xl p-4 border border-gray-700">
-                <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
-                  <Dices className="text-amber-400" /> The Situation
+              <div className="jianghu-origin-summary">
+                <h3 className="mb-2 flex items-center gap-2 font-semibold text-white">
+                  <Dices className="text-amber-300" /> The situation
                 </h3>
                 <p className="text-sm text-gray-300">{selectedOrigin.hook}</p>
-                <p className="text-xs text-gray-500 mt-2">
+                <p className="mt-2 text-xs text-gray-400">
                   {name.trim() || 'Wanderer'} · {PRESET_COPY[presetId].title}
                 </p>
               </div>
               <div className="flex gap-3">
                 <button
                   onClick={() => setStep(1)}
-                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-bold py-3 rounded-lg transition-all"
+                  className="jianghu-button flex-1"
                 >
-                  ← Back
+                  <span aria-hidden="true">←</span> Back
                 </button>
                 <button
                   onClick={handleCreate}
                   disabled={isCreating}
-                  className="flex-1 bg-gradient-to-r from-purple-600 to-amber-500 hover:from-purple-500 hover:to-amber-400 text-white font-bold py-3 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="jianghu-button jianghu-button--primary flex-1 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isCreating ? '⏳ Entering the Jianghu...' : 'Begin Journey'}
+                  {isCreating ? 'Entering the Jianghu...' : 'Begin journey'}
                 </button>
               </div>
             </div>
           )}
-        </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }

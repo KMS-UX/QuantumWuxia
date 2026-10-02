@@ -6,9 +6,11 @@ import { buildNarratorDigest } from '../../src/engine/narratorDigest';
 import { qiRecovery } from '../../src/engine/wuxiaRules';
 import { fallbackNarration } from '../../src/ai/fallbackNarrator';
 import { resolveAction } from '../../src/engine/resolveAction';
+import { resolvePlayerAction } from '../../src/engine/actionPipeline';
 import type { RiskLevel, SimulationState } from '../../src/engine/types';
 import { validateState } from '../../src/engine/validateState';
-import { ARTS_BY_ID, NPC_PROFILES, buildDigestOptions, createWuxiaSimulation, instantiateArt } from '../../src/world/content';
+import type { GameState } from '../../src/types/game';
+import { ARTS_BY_ID, FANTASY_PRESETS, NPC_PROFILES, buildDigestOptions, createOriginCharacter, createWuxiaSimulation, findOrigin, instantiateArt } from '../../src/world/content';
 
 const options = buildDigestOptions();
 const run = (sim: SimulationState, text: string, roll: number, risk: RiskLevel = 'medium') =>
@@ -174,6 +176,24 @@ test('being beaten at low HP plays out end to end: robbed, left alive, Face lost
   assert.equal(spared.events.find(e => e.type === 'character.defeated')!.payload.outcome, 'mercy');
   assert.deepStrictEqual(spared.state.character.inventory, ['plain sword', 'copper coins']);
   assert.ok(spared.state.character.hp >= 1);
+});
+
+test('robbery syncs canonical inventory loss back to the live GameState and save model', () => {
+  const origin = findOrigin('origin-disgraced-disciple')!;
+  const simulation = createWuxiaSimulation(origin.id, FANTASY_PRESETS.living_legends, 'Tester', 7);
+  simulation.character.hp = 8;
+  const game: GameState = {
+    character: createOriginCharacter(origin, 'Tester', 'character-1', 'living_legends'),
+    turns: [], currentScene: '', location: simulation.character.locationId,
+    questLog: [], relationships: [], isGameStarted: true, isGameOver: false, turnCount: 0, simulation,
+  };
+
+  const result = resolvePlayerAction(game, 'Attack the Wandering Swordsman', 'medium', 5);
+
+  assert.equal(result.resolution.events.find(e => e.type === 'character.defeated')?.payload.outcome, 'robbed');
+  assert.deepStrictEqual(result.nextGameState.simulation?.character.inventory, []);
+  assert.deepStrictEqual(result.nextGameState.character?.inventory, []);
+  assert.equal(result.nextGameState.character?.stats.currentHp, result.nextGameState.simulation?.character.hp);
 });
 
 test('death is possible and final, and is clearly caused: reckless lethal assault on a master at low HP', () => {

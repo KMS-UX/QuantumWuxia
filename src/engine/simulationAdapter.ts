@@ -1,4 +1,4 @@
-import type { GameState } from '../types/game';
+import type { GameState, InventoryItem } from '../types/game';
 import type { SimulationState } from './types';
 import { validateState } from './validateState';
 import { migrateLegacyGameState } from './simulationMigration';
@@ -51,6 +51,23 @@ function cloneSimulation(simulation: SimulationState): SimulationState {
 export function mergeSimulationState(gameState: GameState, simulation: SimulationState): GameState {
   if (!gameState.character) return gameState;
   const cloned = cloneSimulation(simulation);
+  const inventoryCounts = new Map<string, number>();
+  for (const item of cloned.character.inventory) {
+    inventoryCounts.set(item, (inventoryCounts.get(item) ?? 0) + 1);
+  }
+  const inventoryItems: InventoryItem[] = Array.from(inventoryCounts, ([itemKey, quantity]) => {
+    const existing = gameState.character!.inventory.find(item => item.id === itemKey || item.name === itemKey);
+    return existing
+      ? { ...existing, quantity }
+      : {
+          id: `simulation-item-${encodeURIComponent(itemKey)}`,
+          name: itemKey,
+          type: 'misc',
+          description: itemKey,
+          quantity,
+          value: 0,
+        };
+  });
 
   return {
     ...gameState,
@@ -62,6 +79,7 @@ export function mergeSimulationState(gameState: GameState, simulation: Simulatio
         currentMana: cloned.character.qi,
         maxMana: cloned.character.maxQi,
       },
+      inventory: inventoryItems,
     },
     location: cloned.character.locationId,
     turnCount: cloned.world.turn,

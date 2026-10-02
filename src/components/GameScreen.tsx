@@ -26,6 +26,13 @@ export default function GameScreen() {
   const [showDatabase, setShowDatabase] = useState(false);
   const narrativeEndRef = useRef<HTMLDivElement>(null);
   const character = gameState.character!;
+  const simulationCharacter = gameState.simulation?.character;
+  const wuxia = character.originId ? simulationCharacter?.wuxia : undefined;
+  const isWuxia = Boolean(wuxia && simulationCharacter);
+  const displayedHp = isWuxia ? simulationCharacter!.hp : character.stats.currentHp;
+  const displayedMaxHp = isWuxia ? simulationCharacter!.maxHp : character.stats.maxHp;
+  const displayedQi = isWuxia ? simulationCharacter!.qi : character.stats.currentMana;
+  const displayedMaxQi = isWuxia ? simulationCharacter!.maxQi : character.stats.maxMana;
   const lastTurn = gameState.turns[gameState.turns.length - 1];
   const { visitedLocations, journalEntries, addJournalEntry, deleteJournalEntry, settings } = useGameStore();
 
@@ -69,15 +76,15 @@ export default function GameScreen() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-900 text-white overflow-hidden">
+    <div className={`h-screen flex flex-col bg-gray-900 text-white overflow-hidden ${isWuxia ? 'jianghu-game' : ''}`}>
       {/* Header */}
       <header className="bg-gray-800/80 backdrop-blur-sm border-b border-gray-700 px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold text-amber-400 hidden md:block">⚔️ Realm of Echoes</h1>
+          <h1 className="text-lg font-bold text-amber-400 hidden md:block">QuantumWuxia</h1>
           <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded">
             Turn {gameState.turnCount}
           </span>
-          <WeatherDisplay turnCount={gameState.turnCount} worldTheme={settings.worldTheme} />
+          {!isWuxia && <WeatherDisplay turnCount={gameState.turnCount} worldTheme={settings.worldTheme} />}
           <button
             onClick={() => setShowSaveModal(true)}
             className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white px-2 py-1 rounded transition-all flex items-center gap-1"
@@ -109,16 +116,35 @@ export default function GameScreen() {
           <MiniMap
             currentLocation={gameState.location}
             visitedLocations={visitedLocations}
-            totalLocations={Math.max(8, visitedLocations.length + 3)}
+            totalLocations={isWuxia && gameState.simulation ? gameState.simulation.world.locationIds.length : Math.max(8, visitedLocations.length + 3)}
           />
-          <div className="flex items-center gap-1">
-            <Coins className="w-3.5 h-3.5 text-yellow-400" />
-            <span className="text-gray-300">{character.gold}g</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Star className="w-3.5 h-3.5 text-purple-400" />
-            <span className="text-gray-300">Lv.{character.level}</span>
-          </div>
+          {isWuxia ? (
+            <>
+              <div className="flex items-center gap-1" title="Health">
+                <Heart className="w-3.5 h-3.5 text-red-400" />
+                <span className="text-gray-300">{displayedHp}/{displayedMaxHp}</span>
+              </div>
+              <div className="flex items-center gap-1" title="Qi">
+                <Droplets className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="text-gray-300">{displayedQi}/{displayedMaxQi} Qi</span>
+              </div>
+              <div className="flex items-center gap-1" title="Face">
+                <Star className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-gray-300">{wuxia?.social.face} Face</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-1">
+                <Coins className="w-3.5 h-3.5 text-yellow-400" />
+                <span className="text-gray-300">{character.gold}g</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Star className="w-3.5 h-3.5 text-purple-400" />
+                <span className="text-gray-300">Lv.{character.level}</span>
+              </div>
+            </>
+          )}
         </div>
       </header>
 
@@ -161,11 +187,11 @@ export default function GameScreen() {
           <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700 mb-4">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-purple-600 flex items-center justify-center text-lg">
-                {character.race === 'Elf' ? '🧝' : character.race === 'Dwarf' ? '⛏️' : character.race === 'Halfling' ? '🍀' : character.race === 'Dragonborn' ? '🐉' : character.race === 'Tiefling' ? '😈' : '👤'}
+                {isWuxia ? '⚔️' : character.race === 'Elf' ? '🧝' : character.race === 'Dwarf' ? '⛏️' : character.race === 'Halfling' ? '🍀' : character.race === 'Dragonborn' ? '🐉' : character.race === 'Tiefling' ? '😈' : '👤'}
               </div>
               <div>
                 <div className="font-bold text-sm">{character.name}</div>
-                <div className="text-xs text-gray-400">{character.race} {character.class}</div>
+                <div className="text-xs text-gray-400">{isWuxia ? character.class : `${character.race} ${character.class}`}</div>
               </div>
             </div>
             
@@ -175,78 +201,95 @@ export default function GameScreen() {
                 <span className="flex items-center gap-1 text-red-400">
                   <Heart className="w-3 h-3" /> HP
                 </span>
-                <span>{character.stats.currentHp}/{character.stats.maxHp}</span>
+                <span>{displayedHp}/{displayedMaxHp}</span>
               </div>
               <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-red-600 to-red-400 transition-all"
-                  style={{ width: `${(character.stats.currentHp / character.stats.maxHp) * 100}%` }}
+                  style={{ width: `${displayedMaxHp ? (displayedHp / displayedMaxHp) * 100 : 0}%` }}
                 />
               </div>
             </div>
             
-            {/* Mana Bar */}
+            {/* Qi or legacy mana */}
             <div className="mb-2">
               <div className="flex justify-between text-xs mb-0.5">
-                <span className="flex items-center gap-1 text-blue-400">
-                  <Droplets className="w-3 h-3" /> MP
+                <span className={`flex items-center gap-1 ${isWuxia ? 'text-cyan-400' : 'text-blue-400'}`}>
+                  <Droplets className="w-3 h-3" /> {isWuxia ? 'Qi' : 'MP'}
                 </span>
-                <span>{character.stats.currentMana}/{character.stats.maxMana}</span>
+                <span>{displayedQi}/{displayedMaxQi}</span>
               </div>
               <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-blue-600 to-blue-400 transition-all"
-                  style={{ width: `${(character.stats.currentMana / character.stats.maxMana) * 100}%` }}
+                  className={`h-full transition-all ${isWuxia ? 'bg-gradient-to-r from-cyan-700 to-cyan-400' : 'bg-gradient-to-r from-blue-600 to-blue-400'}`}
+                  style={{ width: `${displayedMaxQi ? (displayedQi / displayedMaxQi) * 100 : 0}%` }}
                 />
               </div>
             </div>
 
-            {/* XP Bar */}
-            <div>
-              <div className="flex justify-between text-xs mb-0.5">
-                <span className="flex items-center gap-1 text-purple-400">
-                  <Star className="w-3 h-3" /> XP
-                </span>
-                <span>{character.experience}/{character.level * 100}</span>
+            {isWuxia && simulationCharacter ? (
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between text-gray-400"><span>Cultivation</span><span className="text-cyan-200">{wuxia?.cultivation.stage.replace('_', ' ')}</span></div>
+                <div className="flex justify-between text-gray-400"><span>Fatigue</span><span>{simulationCharacter.fatigue}/100</span></div>
+                <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-500" style={{ width: `${simulationCharacter.fatigue}%` }} />
+                </div>
               </div>
-              <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-purple-600 to-purple-400 transition-all"
-                  style={{ width: `${(character.experience / (character.level * 100)) * 100}%` }}
-                />
+            ) : (
+              <div>
+                <div className="flex justify-between text-xs mb-0.5">
+                  <span className="flex items-center gap-1 text-purple-400"><Star className="w-3 h-3" /> XP</span>
+                  <span>{character.experience}/{character.level * 100}</span>
+                </div>
+                <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-purple-600 to-purple-400 transition-all" style={{ width: `${(character.experience / (character.level * 100)) * 100}%` }} />
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* Stats */}
           <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700 mb-4">
-            <h3 className="text-xs font-bold text-gray-400 uppercase mb-2">Stats</h3>
-            <div className="grid grid-cols-2 gap-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-gray-400">STR</span>
-                <span className="text-white font-bold">{character.stats.strength}</span>
+            <h3 className="text-xs font-bold text-gray-400 uppercase mb-2">{isWuxia ? 'Attributes' : 'Stats'}</h3>
+            {isWuxia && simulationCharacter ? (
+              <div className="grid grid-cols-2 gap-1 text-xs">
+                {[
+                  ['STR', simulationCharacter.attributes.strength], ['AGI', simulationCharacter.attributes.agility],
+                  ['CON', simulationCharacter.attributes.constitution], ['PER', simulationCharacter.attributes.perception],
+                  ['INT', simulationCharacter.attributes.intelligence], ['CHA', simulationCharacter.attributes.charisma],
+                  ['LCK', simulationCharacter.attributes.luck],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex justify-between"><span className="text-gray-400">{label}</span><span className="text-white font-bold">{value}</span></div>
+                ))}
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">AGI</span>
-                <span className="text-white font-bold">{character.stats.agility}</span>
+            ) : (
+              <div className="grid grid-cols-2 gap-1 text-xs">
+                {[
+                  ['STR', character.stats.strength], ['AGI', character.stats.agility],
+                  ['INT', character.stats.intelligence], ['CHA', character.stats.charisma], ['LCK', character.stats.luck],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex justify-between"><span className="text-gray-400">{label}</span><span className="text-white font-bold">{value}</span></div>
+                ))}
               </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">INT</span>
-                <span className="text-white font-bold">{character.stats.intelligence}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">CHA</span>
-                <span className="text-white font-bold">{character.stats.charisma}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-400">LCK</span>
-                <span className="text-white font-bold">{character.stats.luck}</span>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Skills */}
-          {character.skills.length > 0 && (
+          {isWuxia && wuxia ? (
+            <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700 mb-4">
+              <h3 className="text-xs font-bold text-gray-400 uppercase mb-2">Martial Arts</h3>
+              <div className="space-y-3">
+                {wuxia.martialArts.map(art => (
+                  <div key={art.id}>
+                    <div className="flex justify-between gap-2 text-xs"><span className="text-gray-200">{art.name}</span><span className="text-amber-300">{art.mastery}</span></div>
+                    <div className="h-1 bg-gray-700 rounded-full mt-1 overflow-hidden"><div className="h-full bg-amber-500" style={{ width: `${art.mastery}%` }} /></div>
+                    <div className="mt-1 text-[11px] text-gray-500">{art.techniques.length} techniques · {art.techniques.filter(t => t.minMastery === undefined || art.mastery >= t.minMastery).length} available</div>
+                  </div>
+                ))}
+                {wuxia.martialArts.length === 0 && <p className="text-xs text-gray-500 italic">No learned arts</p>}
+              </div>
+            </div>
+          ) : character.skills.length > 0 && (
             <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700 mb-4">
               <h3 className="text-xs font-bold text-gray-400 uppercase mb-2">Skills</h3>
               <div className="flex flex-wrap gap-1">
@@ -256,6 +299,22 @@ export default function GameScreen() {
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+
+          {isWuxia && wuxia && (
+            <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700 mb-4">
+              <h3 className="text-xs font-bold text-gray-400 uppercase mb-2">Wounds</h3>
+              {wuxia.injuries.length ? (
+                <div className="space-y-2">
+                  {wuxia.injuries.map(injury => (
+                    <div key={injury.id} className="text-xs">
+                      <div className="flex justify-between gap-2"><span className="text-red-300">{injury.bodyRegion.replace(/([A-Z])/g, ' $1').toLowerCase()}</span><span className="text-gray-400">Severity {injury.severity}</span></div>
+                      <div className="text-gray-500">{injury.healingTurns} turns to heal{injury.untreated ? ' · untreated' : ''}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : <p className="text-xs text-gray-500 italic">No active injuries</p>}
             </div>
           )}
 
@@ -422,21 +481,21 @@ export default function GameScreen() {
           className={`flex-1 py-2 text-center text-xs ${activeTab === 'character' ? 'text-amber-400' : 'text-gray-400'}`}
         >
           <User className="w-4 h-4 mx-auto mb-0.5" />
-          Hero
+          {isWuxia ? 'Cultivation' : 'Hero'}
         </button>
         <button
           onClick={() => setActiveTab('inventory')}
           className={`flex-1 py-2 text-center text-xs ${activeTab === 'inventory' ? 'text-amber-400' : 'text-gray-400'}`}
         >
           <Package className="w-4 h-4 mx-auto mb-0.5" />
-          Items
+          {isWuxia ? 'Pack' : 'Items'}
         </button>
         <button
           onClick={() => setActiveTab('quests')}
           className={`flex-1 py-2 text-center text-xs ${activeTab === 'quests' ? 'text-amber-400' : 'text-gray-400'}`}
         >
           <Swords className="w-4 h-4 mx-auto mb-0.5" />
-          Quests
+          {isWuxia ? 'Jianghu' : 'Quests'}
         </button>
         <button
           onClick={() => setActiveTab('settings')}
@@ -448,7 +507,7 @@ export default function GameScreen() {
       </nav>
 
       {/* Save/Load Modal */}
-      {showSaveModal && <SaveLoadModal onClose={() => setShowSaveModal(false)} />}
+      {showSaveModal && <SaveLoadModal themeWuxia={isWuxia} onClose={() => setShowSaveModal(false)} />}
 
       {/* Database Manager */}
       {showDatabase && <DatabaseManager onClose={() => setShowDatabase(false)} />}
@@ -491,15 +550,40 @@ function NarrativeText({ text }: { text: string }) {
 function RightPanel() {
   const { gameState } = useGameStore();
   const character = gameState.character!;
+  const simulation = gameState.simulation;
+  const simulationCharacter = simulation?.character;
+  const wuxia = character.originId ? simulationCharacter?.wuxia : undefined;
+  const isWuxia = Boolean(wuxia && simulationCharacter);
+  const locationId = simulationCharacter?.locationId ?? gameState.location;
+  const jianghu = isWuxia ? simulation?.jianghu : undefined;
+  const peopleHere = jianghu?.npcs.filter(npc => npc.alive && npc.locationId === locationId) ?? [];
+  const publicEvents = jianghu?.worldEvents.filter(event => event.active && event.locationId === locationId) ?? [];
+  const knownRumors = jianghu?.rumors.filter(rumor =>
+    rumor.currentLocationId === locationId && rumor.knownBy.includes(simulationCharacter!.id),
+  ) ?? [];
   
   return (
     <div className="p-4 space-y-4">
       {/* Quest Log */}
       <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700">
         <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
-          <Scroll className="w-3 h-3" /> Quest Log
+          <Scroll className="w-3 h-3" /> {isWuxia ? 'Local Jianghu' : 'Quest Log'}
         </h3>
-        {gameState.questLog.length === 0 ? (
+        {isWuxia ? (
+          <div className="space-y-3">
+            {publicEvents.length ? (
+              <div className="space-y-2">
+                {publicEvents.map(event => <div key={event.id} className="text-xs"><div className="font-semibold text-amber-300">{event.title}</div><div className="mt-0.5 text-gray-400">{event.description}</div></div>)}
+              </div>
+            ) : <p className="text-xs text-gray-500 italic">No pressing public event here.</p>}
+            {knownRumors.length > 0 && (
+              <div className="border-t border-gray-700 pt-2">
+                <div className="mb-1 text-[11px] font-semibold uppercase text-gray-500">What you have heard</div>
+                <div className="space-y-1">{knownRumors.map(rumor => <p key={rumor.id} className="text-xs text-gray-300">“{rumor.text}”</p>)}</div>
+              </div>
+            )}
+          </div>
+        ) : gameState.questLog.length === 0 ? (
           <p className="text-xs text-gray-500 italic">No active quests yet...</p>
         ) : (
           <div className="space-y-2">
@@ -521,9 +605,13 @@ function RightPanel() {
       {/* Relationships */}
       <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700">
         <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
-          <User className="w-3 h-3" /> Known Characters
+          <User className="w-3 h-3" /> {isWuxia ? 'People Here' : 'Known Characters'}
         </h3>
-        {gameState.relationships.length === 0 ? (
+        {isWuxia ? peopleHere.length === 0 ? (
+          <p className="text-xs text-gray-500 italic">No one of note is nearby.</p>
+        ) : (
+          <div className="space-y-2">{peopleHere.map(npc => <div key={npc.id} className="text-xs"><div className="font-semibold text-gray-200">{npc.name}</div><div className="text-gray-500">{npc.role}</div></div>)}</div>
+        ) : gameState.relationships.length === 0 ? (
           <p className="text-xs text-gray-500 italic">No one of note yet...</p>
         ) : (
           <div className="space-y-2">
@@ -577,26 +665,24 @@ function RightPanel() {
       {/* Combat Stats */}
       <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700">
         <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
-          <Zap className="w-3 h-3" /> Combat Readiness
+          <Zap className="w-3 h-3" /> {isWuxia ? 'Cultivation' : 'Combat Readiness'}
         </h3>
-        <div className="space-y-1 text-xs">
-          <div className="flex justify-between">
-            <span className="text-gray-400">Attack Power</span>
-            <span className="text-white">{character.stats.strength * 2 + character.level}</span>
+        {isWuxia && wuxia ? (
+          <div className="space-y-1 text-xs">
+            <div className="flex justify-between"><span className="text-gray-400">Stage</span><span className="text-cyan-200 capitalize">{wuxia.cultivation.stage.replace('_', ' ')}</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Qi control</span><span className="text-white">{wuxia.cultivation.qiControl}/100</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Meridians</span><span className="text-white">{wuxia.cultivation.meridianIntegrity}/100</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Face</span><span className="text-white">{wuxia.social.face}/100</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Reputation</span><span className="text-white">{wuxia.social.reputation}</span></div>
           </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Defense</span>
-            <span className="text-white">{character.stats.strength + character.stats.agility}</span>
+        ) : (
+          <div className="space-y-1 text-xs">
+            <div className="flex justify-between"><span className="text-gray-400">Attack Power</span><span className="text-white">{character.stats.strength * 2 + character.level}</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Defense</span><span className="text-white">{character.stats.strength + character.stats.agility}</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Evasion</span><span className="text-white">{character.stats.agility * 2}%</span></div>
+            <div className="flex justify-between"><span className="text-gray-400">Crit Chance</span><span className="text-white">{character.stats.luck * 3}%</span></div>
           </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Evasion</span>
-            <span className="text-white">{character.stats.agility * 2}%</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-400">Crit Chance</span>
-            <span className="text-white">{character.stats.luck * 3}%</span>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ interface TutorialStep {
 
 const TUTORIAL_STEPS: TutorialStep[] = [
   {
-    title: 'Welcome to Realm of Echoes!',
+    title: 'Welcome to Quantum Wuxia',
     content: 'This is an AI-powered text RPG where every turn is narrated by artificial intelligence. Your choices shape the story in unique ways.',
     icon: '⚔️',
   },
@@ -20,12 +20,12 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   },
   {
     title: 'Free Intent System',
-    content: 'Don\'t like the choices? Type what you want to do in the text box below. Write up to 200 characters describing your action. The AI will narrate the results!',
+    content: 'Don\'t like the choices? Type what you want to do in the text box below. The simulation resolves your action; the narrator describes the confirmed result.',
     icon: '🔮',
   },
   {
     title: 'Your Character',
-    content: 'Track your HP, Mana, stats, inventory, and skills in the side panel. Level up by gaining experience from your adventures.',
+    content: 'Track your health, Qi, fatigue, cultivation, martial arts, and injuries in your character record.',
     icon: '🧙',
   },
   {
@@ -53,13 +53,20 @@ const TUTORIAL_STEPS: TutorialStep[] = [
 interface TutorialProps {
   onComplete: () => void;
   onSkip: () => void;
+  wuxia?: boolean;
 }
 
-export default function Tutorial({ onComplete, onSkip }: TutorialProps) {
+export default function Tutorial({ onComplete, onSkip, wuxia = false }: TutorialProps) {
   const [currentStep, setCurrentStep] = useState(0);
+  const steps = wuxia ? TUTORIAL_STEPS.map((step, index) => {
+    if (index === 0) return { ...step, title: 'Welcome to Quantum Wuxia', content: 'Enter the Nine Rivers Jianghu: a persistent world of martial traditions, shifting ties, rumors, and consequence.' };
+    if (index === 2) return { ...step, content: 'Type an action in your own words. The simulation validates and resolves it; the narrator describes the confirmed result.' };
+    if (index === 3) return { ...step, title: 'Your cultivation', content: 'Track health, Qi, fatigue, Face, learned arts, technique mastery, and injuries in your character record.' };
+    return step;
+  }) : TUTORIAL_STEPS;
 
   const handleNext = () => {
-    if (currentStep < TUTORIAL_STEPS.length - 1) {
+    if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
       onComplete();
@@ -72,20 +79,20 @@ export default function Tutorial({ onComplete, onSkip }: TutorialProps) {
     }
   };
 
-  const step = TUTORIAL_STEPS[currentStep];
+  const step = steps[currentStep];
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="bg-gradient-to-br from-gray-900 to-gray-800 border border-gray-700 rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl">
+    <div className={`${wuxia ? 'jianghu-overlay' : 'bg-black/80'} fixed inset-0 z-[100] flex items-center justify-center p-4 backdrop-blur-sm`}>
+      <div className={`max-w-2xl w-full overflow-hidden border shadow-2xl ${wuxia ? 'border-white/20 bg-[#17231e]' : 'rounded-2xl border-gray-700 bg-gradient-to-br from-gray-900 to-gray-800'}`}>
         {/* Header */}
-        <div className="bg-gradient-to-r from-amber-900/30 to-purple-900/30 p-6 border-b border-gray-700">
+        <div className={`p-6 border-b border-gray-700 ${wuxia ? 'bg-emerald-950/40' : 'bg-gradient-to-r from-amber-900/30 to-purple-900/30'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="text-5xl">{step.icon}</div>
               <div>
                 <h2 className="text-2xl font-bold text-white">{step.title}</h2>
                 <div className="text-sm text-gray-400 mt-1">
-                  Step {currentStep + 1} of {TUTORIAL_STEPS.length}
+                  Step {currentStep + 1} of {steps.length}
                 </div>
               </div>
             </div>
@@ -109,7 +116,7 @@ export default function Tutorial({ onComplete, onSkip }: TutorialProps) {
         {/* Progress Bar */}
         <div className="px-8 pb-4">
           <div className="flex gap-1">
-            {TUTORIAL_STEPS.map((_, i) => (
+            {steps.map((_, i) => (
               <div
                 key={i}
                 className={`h-1 flex-1 rounded-full transition-all ${
@@ -132,10 +139,10 @@ export default function Tutorial({ onComplete, onSkip }: TutorialProps) {
           </button>
 
           <button
-            onClick={currentStep === TUTORIAL_STEPS.length - 1 ? onComplete : handleNext}
+            onClick={currentStep === steps.length - 1 ? onComplete : handleNext}
             className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold rounded-lg transition-all"
           >
-            {currentStep === TUTORIAL_STEPS.length - 1 ? (
+            {currentStep === steps.length - 1 ? (
               <>
                 <Check className="w-4 h-4" />
                 Start Playing

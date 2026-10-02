@@ -4,10 +4,19 @@ import { SaveSlot } from '../types/game';
 import { Save, Download, Trash2, X, Clock, User, MapPin } from 'lucide-react';
 import { format } from 'date-fns';
 
-export default function SaveLoadModal({ onClose }: { onClose: () => void }) {
+interface SaveLoadModalProps {
+  onClose: () => void;
+  initialMode?: 'save' | 'load';
+  allowSave?: boolean;
+  onLoaded?: () => void;
+  themeWuxia?: boolean;
+}
+
+export default function SaveLoadModal({ onClose, initialMode = 'save', allowSave = true, onLoaded, themeWuxia = false }: SaveLoadModalProps) {
   const { gameState, settings, saveGame, loadGame, deleteSave, saveSlots } = useGameStore();
   const [saveName, setSaveName] = useState('');
-  const [mode, setMode] = useState<'save' | 'load'>('save');
+  const [mode, setMode] = useState<'save' | 'load'>(initialMode);
+  const wuxiaTheme = themeWuxia || Boolean(gameState.character?.originId);
 
   const handleSave = () => {
     if (!saveName.trim()) return;
@@ -19,6 +28,7 @@ export default function SaveLoadModal({ onClose }: { onClose: () => void }) {
   const handleLoad = (slot: SaveSlot) => {
     loadGame(slot.id);
     onClose();
+    onLoaded?.();
   };
 
   const handleDelete = (slotId: string) => {
@@ -28,26 +38,28 @@ export default function SaveLoadModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-sm ${wuxiaTheme ? 'jianghu-modal-scrim' : 'bg-black/70'}`}>
+      <div className={`max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col ${wuxiaTheme ? 'jianghu-modal' : 'rounded-2xl border border-gray-700 bg-gray-900'}`}>
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <div className="flex gap-2">
-            <button
-              onClick={() => setMode('save')}
-              className={`px-4 py-2 rounded-lg font-bold transition-all ${
-                mode === 'save' ? 'bg-amber-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
-              }`}
-            >
-              💾 Save Game
-            </button>
+            {allowSave && (
+              <button
+                onClick={() => setMode('save')}
+                className={`px-4 py-2 rounded-lg font-bold transition-all ${
+                  mode === 'save' ? 'bg-amber-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
+                }`}
+              >
+                Save journey
+              </button>
+            )}
             <button
               onClick={() => setMode('load')}
               className={`px-4 py-2 rounded-lg font-bold transition-all ${
                 mode === 'load' ? 'bg-amber-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
               }`}
             >
-              📂 Load Game
+              Load journey
             </button>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white p-2">
@@ -57,7 +69,7 @@ export default function SaveLoadModal({ onClose }: { onClose: () => void }) {
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4">
-          {mode === 'save' && (
+          {mode === 'save' && allowSave && (
             <div className="space-y-4">
               <div>
                 <label className="block text-sm text-gray-300 mb-2">Save Name</label>
@@ -125,9 +137,9 @@ export default function SaveLoadModal({ onClose }: { onClose: () => void }) {
                           </span>
                           <span className="flex items-center gap-1">
                             <User className="w-3 h-3" />
-                            {slot.characterName} (Lv.{slot.characterLevel})
+                            {slot.characterName}{slot.gameState.character?.originId ? ` · ${slot.gameState.character.class}` : ` (Lv.${slot.characterLevel})`}
                           </span>
-                          <span>Turn {slot.turnCount}</span>
+                          <span>Turn {slot.turnCount} · {slot.gameState.location}</span>
                         </div>
                       </div>
                       <button

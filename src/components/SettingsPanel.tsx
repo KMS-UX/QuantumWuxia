@@ -56,12 +56,21 @@ export default function SettingsPanel() {
     }
 
     const character = gameState.character;
+    const simulation = gameState.simulation;
+    const isWuxia = Boolean(character.originId && simulation?.character.wuxia);
     let log = `═══════════════════════════════════════════════════════════\n`;
-    log += `  REALM OF ECHOES - ADVENTURE LOG\n`;
+    log += `  QUANTUM WUXIA - JIANGHU CHRONICLE\n`;
     log += `═══════════════════════════════════════════════════════════\n\n`;
     log += `Character: ${character.name}\n`;
-    log += `Race: ${character.race} | Class: ${character.class}\n`;
-    log += `Level: ${character.level} | Gold: ${character.gold}\n`;
+    if (isWuxia && simulation) {
+      log += `Origin: ${character.class}\n`;
+      log += `Cultivation: ${simulation.character.wuxia!.cultivation.stage}\n`;
+      log += `HP: ${simulation.character.hp}/${simulation.character.maxHp} | Qi: ${simulation.character.qi}/${simulation.character.maxQi}\n`;
+      log += `Face: ${simulation.character.wuxia!.social.face} | Fatigue: ${simulation.character.fatigue}\n`;
+    } else {
+      log += `Race: ${character.race} | Class: ${character.class}\n`;
+      log += `Level: ${character.level} | Gold: ${character.gold}\n`;
+    }
     log += `Location: ${gameState.location}\n`;
     log += `Total Turns: ${gameState.turnCount}\n`;
     log += `Date: ${new Date().toLocaleString()}\n\n`;
@@ -84,7 +93,7 @@ export default function SettingsPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `realm-of-echoes-${character.name}-${Date.now()}.txt`;
+    a.download = `${isWuxia ? 'quantum-wuxia' : 'adventure'}-${character.name}-${Date.now()}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
