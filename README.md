@@ -1,8 +1,8 @@
-# ⚔️ Realm of Echoes - AI Text RPG
+# ⚔️ Quantum Wuxia - AI Text RPG
 
 A browser-based text RPG with AI-powered narrative and hybrid LLM support (cloud + local).
 
-![Realm of Echoes](https://img.shields.io/badge/Status-Active-success) ![License](https://img.shields.io/badge/License-MIT-blue)
+![Quantum Wuxia](https://img.shields.io/badge/Status-Active-success) ![License](https://img.shields.io/badge/License-MIT-blue)
 
 ## 🎮 Features
 
@@ -248,18 +248,4 @@ npm install
 npm run build
 ```
 
-## 📄 License
-
-MIT License - feel free to use this project however you'd like!
-
-## 🙏 Acknowledgments
-
-Inspired by [Blade RPG](https://www.bladerpg.com) and other text-based RPGs.
-
-## 📮 Contact
-
-For issues, feature requests, or questions, please open an issue on GitHub.
-
 ---
-
-**Enjoy your adventure in the Realm of Echoes!** ⚔️✨
