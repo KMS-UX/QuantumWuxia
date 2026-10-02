@@ -1,4 +1,5 @@
 import type { ProposedAction, SimulationState, StateEvent } from './types';
+import type { FinaleSpec } from './finale';
 
 export type MemoryValence = 'positive' | 'negative' | 'neutral';
 export type RumorStatus = 'unverified' | 'plausible' | 'confirmed' | 'false';
@@ -108,6 +109,8 @@ export interface WorldEventState {
    * Omitted means the original behaviour: 3 stages, one per turn.
    */
   pace?: { steps: number; interval: number };
+  /** Payoff applied when this event's causal chain completes (see finale.ts). The event ends with it. */
+  finale?: FinaleSpec;
 }
 
 /** Normalised, bounded chain pacing for a world event. */

@@ -1,3 +1,4 @@
+import { chainPace } from './jianghu';
 import type { ActionResolution, StateEvent } from './types';
 
 export interface NarratorDigestOptions {
@@ -58,6 +59,9 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
         }
         break;
       }
+      case 'world.finale_resolved':
+        if (witnessed(e)) happened.push(`A decisive moment unfolded before you: ${str(e.payload.headline)} ${str(e.payload.description) ?? ''}`.trim());
+        break;
       case 'character.social_changed':
         if (witnessed(e) && action.kind === 'talk') happened.push(`The conversation went well; ${npcName(action.targetId)} warmed to you slightly.`);
         break;
@@ -102,7 +106,16 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
       lines.push('', 'Public situation here (visible to anyone present):');
       for (const w of conditions) {
         const step = advanced.get(w.id);
-        lines.push(`- ${w.title}: ${w.description}${step ? ` Tension is building (stage ${step}).` : ''}`);
+        const chain = jianghu.causalChains?.find(c => c.rootEventId === w.id && c.active);
+        let horizon = '';
+        if (chain && w.finale) {
+          const pace = chainPace(w);
+          const turnsLeft = Math.max(0, chain.nextCheckTurn - state.world.turn) + Math.max(0, pace.steps - chain.step - 1) * pace.interval;
+          // Fuzzy on purpose: the narrator hints, it never quotes a countdown.
+          if (turnsLeft <= 3) horizon = ' It looks set to come to a head very soon.';
+          else if (turnsLeft <= 10) horizon = ' It looks likely to come to a head before long.';
+        }
+        lines.push(`- ${w.title}: ${w.description}${step ? ` Tension is building (stage ${step}).` : ''}${horizon}`);
       }
     }
   }

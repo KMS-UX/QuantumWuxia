@@ -1,4 +1,5 @@
 import type { SimulationState, StateEvent } from './types';
+import { applyFinale } from './finale';
 import { chainPace } from './jianghu';
 import type { JianghuState, KnowledgeRecord, CausalChainState, NPCState, RumorState } from './jianghu';
 
@@ -198,6 +199,11 @@ export function advanceCausalChains(
         type: 'world.causal_chain_completed',
         causes: [`causal-chain:${chain.id}:completion`, `root-event:${chain.rootEventId}`], causalLinks: [chain.rootEventId], payload: { chainId: chain.id, rootEventId: chain.rootEventId },
       });
+      // A completed chain with an authored finale pays off now and ends its event.
+      if (worldEvent.finale) {
+        const finale = applyFinale(j, simulation, worldEvent);
+        if (finale.event) events.push(finale.event);
+      }
     }
   }
 

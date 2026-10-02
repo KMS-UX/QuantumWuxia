@@ -11,7 +11,10 @@ import { soundManager } from '../services/soundManager';
 import { resolvePlayerAction } from '../engine/actionPipeline';
 import { createSimulationState } from '../engine/simulationAdapter';
 import { buildNarratorDigest } from '../engine/narratorDigest';
-import { FANTASY_PRESETS, buildDigestOptions, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
+import { randomSeed } from '../engine/rng';
+import { fallbackNarration } from '../ai/fallbackNarrator';
+import { generateChoices, mergeChoices } from '../ai/choiceGenerator';
+import { FANTASY_PRESETS, buildChoiceContext, buildDigestOptions, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
 import type { SimulationState } from '../engine/types';
 
 interface GameStore {
@@ -182,8 +185,48 @@ function resolveOriginStart(character: Character) {
   if (!origin) return undefined;
   const preset = FANTASY_PRESETS[(character.fantasyPreset ?? '') as keyof typeof FANTASY_PRESETS] ?? FANTASY_PRESETS.living_legends;
   const opening = buildOriginOpening(origin);
-  const simulation: SimulationState = createWuxiaSimulation(origin.id, preset, character.name);
+  const simulation: SimulationState = createWuxiaSimulation(origin.id, preset, character.name, randomSeed());
   return { origin, opening, simulation, scenario: buildOriginScenario(origin) };
+}
+
+/**
+ * Narrate a resolved turn. The simulation has already decided what happened, so a
+ * narrator failure must never lose the turn (Game Bible section 4): for origin
+ * characters an unavailable model, an unusable reply, or demo mode all fall back
+ * to a deterministic account and deterministic choices. Origin characters' LLM
+ * choices are also checked against what the rules can honour.
+ */
+async function narrateResolvedTurn(args: {
+  isDemo: boolean;
+  config: GameSettings['llmConfig'];
+  resolvedState: GameState;
+  prepared: ReturnType<typeof resolvePlayerAction>;
+  promptAction: string;
+  demoFallback: () => LLMResponse;
+}): Promise<{ response: LLMResponse; notice: string | null }> {
+  const { isDemo, config, resolvedState, prepared, promptAction, demoFallback } = args;
+  const origin = !!resolvedState.character?.originId;
+  const simulation = prepared.resolution.state;
+  const offline = (): LLMResponse => ({
+    narrative: fallbackNarration(prepared.resolution, buildDigestOptions()),
+    choices: generateChoices(simulation, buildChoiceContext()),
+    stateUpdates: {},
+  });
+
+  if (isDemo) return { response: origin ? offline() : demoFallback(), notice: null };
+  try {
+    const response = await generateNarrative(config, resolvedState, promptAction);
+    return {
+      response: origin ? { ...response, choices: mergeChoices(response.choices, simulation, buildChoiceContext()) } : response,
+      notice: null,
+    };
+  } catch (error) {
+    console.error('Narrator unavailable; using the deterministic fallback:', error);
+    return {
+      response: origin ? offline() : demoFallback(),
+      notice: 'The narrator is unavailable, so this turn is shown as a plain account. What happened is unaffected.',
+    };
+  }
 }
 
 function getDemoOpening(): LLMResponse {
@@ -351,16 +394,14 @@ export const useGameStore = create<GameStore>()(
             ? `[Resolved action]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
             : `[Resolved action: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
 
-          let response: LLMResponse;
-          if (isDemoMode) {
-            response = getDemoResponse(choiceText);
-          } else {
-            response = await generateNarrative(
-              settings.llmConfig,
-              resolvedState,
-              `[Chose option ${choiceId}]: ${choiceText}\n${resolutionContext}`
-            );
-          }
+          const { response, notice } = await narrateResolvedTurn({
+            isDemo: isDemoMode,
+            config: settings.llmConfig,
+            resolvedState,
+            prepared,
+            promptAction: `[Chose option ${choiceId}]: ${choiceText}\n${resolutionContext}`,
+            demoFallback: () => getDemoResponse(choiceText),
+          });
 
           const turn: GameTurn = {
             id: uuidv4(),
@@ -379,6 +420,7 @@ export const useGameStore = create<GameStore>()(
           set({
             gameState: newState,
             isLoading: false,
+            error: notice,
           });
 
           try {
@@ -411,18 +453,18 @@ export const useGameStore = create<GameStore>()(
         try {
           const prepared = resolvePlayerAction(gameState, action, 'medium');
           const resolvedState = prepared.nextGameState;
-          const resolutionContext = `[Resolved intent: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+          const resolutionContext = gameState.character?.originId
+            ? `[Resolved intent]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
+            : `[Resolved intent: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
 
-          let response: LLMResponse;
-          if (isDemoMode) {
-            response = getDemoResponse(action);
-          } else {
-            response = await generateNarrative(
-              settings.llmConfig,
-              resolvedState,
-              `[Intent]: ${action}\n${resolutionContext}`
-            );
-          }
+          const { response, notice } = await narrateResolvedTurn({
+            isDemo: isDemoMode,
+            config: settings.llmConfig,
+            resolvedState,
+            prepared,
+            promptAction: `[Intent]: ${action}\n${resolutionContext}`,
+            demoFallback: () => getDemoResponse(action),
+          });
 
           const turn: GameTurn = {
             id: uuidv4(),
@@ -442,6 +484,7 @@ export const useGameStore = create<GameStore>()(
           set({
             gameState: newState,
             isLoading: false,
+            error: notice,
           });
 
           try {

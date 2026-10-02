@@ -1,5 +1,5 @@
 import type { Character, GameChoice, InventoryItem } from '../../types/game';
-import { LOCATIONS } from './locations';
+import { LOCATIONS, TRAVEL_EDGES } from './locations';
 import { NPC_PROFILES } from './jianghuSeed';
 import { ORIGINS, type OriginProfile } from './origins';
 
@@ -89,5 +89,15 @@ export function buildDigestOptions(): { npcVoices: Record<string, string>; locat
       l.id,
       `${l.summary} Observable features: ${l.features.join(', ')}. Hazards: ${l.hazards.join(', ')}.`,
     ])),
+  };
+}
+
+/** Neighbours and features for the deterministic choice generator, from the authored map. */
+export function buildChoiceContext() {
+  return {
+    neighbours: (locationId: string) => TRAVEL_EDGES
+      .filter(e => e.a === locationId || e.b === locationId)
+      .map(e => ({ id: e.a === locationId ? e.b : e.a, days: e.days })),
+    features: (locationId: string) => LOCATIONS.find(l => l.id === locationId)?.features ?? [],
   };
 }

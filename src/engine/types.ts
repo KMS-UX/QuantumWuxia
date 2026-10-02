@@ -58,6 +58,8 @@ export interface SimWorld {
   /** Player-known information only; world truth remains in jianghu. */
   knownRumorIds?: string[];
   knownNpcIds?: string[];
+  /** Saved seed and draw counter for replayable rolls (see rng.ts). Absent on older saves. */
+  rng?: { seed: number; draws: number };
 }
 
 export interface SimulationState {
@@ -116,6 +118,7 @@ export interface StateEvent {
     | 'world.npc_action'
     | 'world.causal_chain_advanced'
     | 'world.causal_chain_completed'
+    | 'world.finale_resolved'
     | 'world.causal_branch_selected'
     | 'world.faction_reaction'
     | 'world.location_reaction';

@@ -23,6 +23,10 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
   if (!Number.isFinite(c.fatigue) || c.fatigue < 0 || c.fatigue > 100) {
     issues.push({ path: 'character.fatigue', message: 'Fatigue must be within 0..100.' });
   }
+  const rng = state.world.rng;
+  if (rng && !(Number.isInteger(rng.seed) && rng.seed >= 0 && rng.seed <= 0xffffffff && Number.isInteger(rng.draws) && rng.draws >= 0)) {
+    issues.push({ path: 'world.rng', message: 'rng must hold an integer 32-bit seed and a non-negative integer draw count.' });
+  }
   if (!state.world.locationIds.includes(c.locationId)) {
     issues.push({ path: 'character.locationId', message: 'Current location must exist in world.locationIds.' });
   }

@@ -1,0 +1,1647 @@
+diff --git a/doc/AUDIT_2026-10-01.md b/doc/AUDIT_2026-10-01.md
+index 560cb69..9c0cb19 100644
+--- a/doc/AUDIT_2026-10-01.md
++++ b/doc/AUDIT_2026-10-01.md
+@@ -134,3 +134,84 @@ Findings 1 and 2 in section 4 are resolved. Still open: the narrator event diges
+ - The retry path needs a live provider and is not unit-tested; the validator itself is (9 tests including a 500-case junk-input totality check).
+ 
+ Suite: 74 / 74 (+16 this round).
++
++## 10. Game Bible compliance audit (v5)
++
++Method: each Bible section checked against code, with a test or a measured run where I could. **Met** = enforced and tested; **Partial** = exists but incomplete or unused by the live game; **Gap** = absent. Items changed in v5 are marked ▲.
++
++### §2 Pillars
++| Pillar | Status | Evidence |
++|---|---|---|
++| 1 Agency (5 choices + Intent) | Met ▲ | Five choices and free-form Intent in the store. v5: the narrator's choices are checked against what the rules can honour (invented destinations dropped) and backfilled by a deterministic generator. |
++| 2 Persistent causality | Partial ▲ | v5 finales make one resolved tension start the next (blockade → scarcity → rumors → lifted; assembly → schism → truce). No calendar/season/weather, and the world goes quiet after about turn 75 (see Gaps). |
++| 3 Living Jianghu | Partial | NPC agency is bounded (3 actions/tick) and acts offscreen. Faction `goals` are display strings that no code reads; factions only exert pressure (V3), they do not act. |
++| 4 Martial depth | **Gap** | Arts, techniques, mastery, requirements and counters exist as content only. The resolver never consults `techniqueId`, mastery, rank or Qi cost, and nothing teaches or advances an art. |
++| 5 Social consequence | Partial | Trust/respect/fear/affection/debt/grudge per relationship, memories, and obligations (V3 does enforce `dueTurn`). No Face (mianzi), no promises, reputation is one number per faction, not per region. |
++| 6 Fair uncertainty | Met ▲ | Resolution is deterministic; the narrator gets a perception-filtered digest and its `stateUpdates` are stripped. v5: rolls are seeded and replayable. |
++| 7 Wuxia first | Partial | World content is Wuxia-first with a switchable supernatural layer. The legacy `Spellbook` is mana-based and `Combat.tsx` is a separate, engine-free combat system. |
++| 8 Readable continuity | Partial | Simulation state (including seed, finale data, ledger) lives inside `GameState`, which the store persists. I did not test save/load through the persisted store. |
++
++### §4 Simulation contract
++| Requirement | Status | Evidence |
++|---|---|---|
++| LLM interprets intent into a structured action | **Gap** | Interpretation is a keyword table (`actionInterpreter.ts`); "bribe the guard" becomes `other`; NPC targets need the full name. |
++| Validate, resolve, reduce, log | Met | `resolveAction`: clone, validate before and after, ledger. |
++| Narration cannot grant items, change stats, move the player… | Met ▲ | v4 stripped all `stateUpdates` but a validated `locationChange`; v5 forces the authored start location for origin characters. |
++| AI unavailable ⇒ simulation still runs, fallback narrator | Met ▲ | **Was a violation:** a narrator error discarded the whole resolved turn. v5: `narrateResolvedTurn` commits the turn and uses `fallbackNarration` + `generateChoices`; demo mode does the same for origin characters. |
++| Injected, reproducible randomness | Met ▲ | **Was a gap:** default roll was `Math.random()` with no stored seed. v5: seed + draw counter in `world.rng`; roll N is a pure function of (seed, N); older saves get a seed on their first action. |
++
++### §5 State domains
++Present: Character, Jianghu/World events, NPC, Faction, Relationship, Knowledge, Economy (stock and scarcity). **Absent: QuestState, CombatState, TimeState.** `GameState.questLog` exists but nothing in the engine reads or writes it.
++
++### §6-7 Character, martial model, injury
++- Attributes, Qi and cultivation are modelled; martial-art data is complete in content but unused by rules (pillar 4).
++- Injuries have body regions, but the only source is one backlash on a high-risk failure and no injury changes any mechanic (a broken arm affects nothing).
++- **HP never decreases in the engine, so defeat cannot occur there.** Legacy `Combat.tsx` can reduce HP, and the store then shows an end screen; `revive()` restores half HP automatically, which §7 explicitly says not to use as the default. Defeat-as-new-situation (capture, ransom, debt) is not implemented.
++
++### §8-10 Social, living world, knowledge
++- NPC memory (event, interpretation, confidence) ✔; obligations ✔; knowledge split world/player/NPC with provenance ✔.
++- ▲ Finales plus `spread_rumor` mean offscreen events produce news the player can only learn by being there, hearing it from an NPC, or witnessing it.
++- **Rumors never move between locations** (`currentLocationId` is static; they spread only among NPCs already at the player's location), and they never mutate. Finales work around this by seeding the same news at several named locations.
++
++### §11 Time, travel, environment — **Gap**
++`world.turn` is the only clock. No hour, date, season, weather, travel duration or schedules. Travel costs a fixed turn regardless of distance even though the content pack defines a weighted graph.
++
++### §12-13 Interaction and AI roles
++| Role | Status |
++|---|---|
++| Narrator | Met: validated output, digest-only context, retry, deterministic fallback ▲ |
++| Choice generator | Partial ▲: deterministic and legal-by-construction (tested to interpret to the intended action); the LLM still proposes the primary list for origin characters |
++| Intent interpreter | Gap (keyword table; no ambiguity clarification) |
++| NPC dialogue | Partial: a voice line reaches the narrator; no separate contract that speaks from that NPC's knowledge |
++| World-event proposer | Gap |
++| Runtime schema validation | Met (v4) |
++| "Outcome explains what changed" | Partial: the ledger and digest hold it, but no screen shows costs and changes |
++
++### §14-16 Structure, roadmap, definition of done
++- Folder targets: `src/ai/` now holds `validateNarration`, `choiceGenerator`, `fallbackNarrator`; `src/world/content/` holds authored data. The engine is still flat rather than `actions/ simulation/ consequences/`; the §14 text says that is acceptable.
++- **§16 definition of done: met** (rejection before mutation, same state + action + roll ⇒ same result, no LLM in resolution, state validation at boundaries, no UI/storage/provider imports in `src/engine`, tests for success/failure/blocked/invalid roll/non-mutation).
++- Roadmap: M1 done. **M2 now substantially done** (adapter, validated JSON, safe fallback, narration cannot mutate); the only unmet M2 item is splitting intent interpretation out to its own model contract. M3 partial (Qi, injuries, relationships exist; mastery, sect rank, Face, promises do not). M4 partial (+ finales). M5 not started.
++
++### §18 Change control
++The Bible has not been updated to reflect decisions made since 1.0. They are recorded in `doc/DECISIONS.md` for you to merge or reject.
++
++## 11. v5 additions
++
++### Finale hooks (`src/engine/finale.ts`, `src/world/content/finales.ts`)
++- A world event can carry a `finale`: serializable data of ordered outcomes, each with conditions (player presence, player knowledge, faction tension/hostility, NPC alive/disposition, market scarcity) and effects (adjust faction / relation / NPC / market, add NPC goal, spread rumor at named locations, start a follow-up event). The first outcome whose conditions all hold wins; the last must be unconditional. No randomness, no LLM.
++- It fires when the event's causal chain completes (V4), ends the event, and emits `world.finale_resolved`. If the player is at the event's location they witness it: ledger witnesses, an `observation` knowledge record, and the narrator digest/fallback describe it. If not, nothing is told to them; the news exists only as rumors at the named places.
++- Cascades are bounded: `start_event` skips an id that already exists, so a finale chain cannot loop.
++- Digest foreshadowing: a local event with a finale says it will "come to a head very soon / before long" (deliberately fuzzy, never a countdown).
++- Seven authored finales (three seeded events plus four follow-ups), calibrated on a passive run: Toll Dispute → `ferry-blockade` (turn 21) → `blockade-lifted` (37); Fever Season → `fever-epidemic` (25) → `shortage-eased` (41); Autumn Assembly → `hall-schism` (49) → `uneasy-truce` (74). Engaging changes the outcome: being present with enough goodwill gives `toll-mediated` or `healer-rallied`, and being at Jade Hall knowing the volume is missing with Elder Bai's trust gives `volume-exposed`.
++- Goodwill decays while a faction dispute builds (stages 2-3), so trust has to be maintained: the integration test needs conversations both early and just before the finale.
++
++### Also in v5
++- `src/ai/fallbackNarrator.ts`, `src/ai/choiceGenerator.ts`, `src/engine/rng.ts`, and the store's `narrateResolvedTurn` (see §10).
++- `useIntent` now sends the digest for origin characters too (only `makeChoice` did before).
++- `llmService.narrate` throws if no usable narrative survives the retry, so the store can fall back.
++
++### Known limits of v5
++- After about turn 75 in passive play the seeded events are all resolved and nothing starts new ones; V3 only spawns faction-conflict events when hostility is at least 70. A world-event proposer (§13) is the missing piece.
++- Finale outcomes cannot kill an NPC, change a relationship's trust/respect separately from disposition, or start a quest.
++- Choice generation and fallback narration are tested against all six origins' first twelve turns, not against the full space of states.
++- Nothing here was played in a browser.
+diff --git a/doc/DECISIONS.md b/doc/DECISIONS.md
+new file mode 100644
+index 0000000..d5c6a1b
+--- /dev/null
++++ b/doc/DECISIONS.md
+@@ -0,0 +1,23 @@
++# QuantumWuxia — Decision Log
++
++Candidate Bible §18 entries from the v2-v5 work. Each says what changed, why, and which systems it touches. Merge into `GAME_BIBLE.md` or reject.
++
++| # | Decision | Reason | Affects |
++|---|---|---|---|
++| D1 | The playable world is authored in `src/world/content` and builds a complete `SimulationState` from an origin (`createWuxiaSimulation`). The legacy Human/Elf/Warrior/Mage creation flow is replaced. | The live game was a one-location world with generic fantasy characters; Bible §1, §3, §7. | creation UI, store `startNewGame`, `Character.originId` |
++| D2 | A successful `talk` makes the NPC share at most one rumor they know and the player does not (highest credibility first). Secrets are never shared this way. | Knowledge tracking existed but nothing ever told the player anything; Bible §10. | `resolveAction`, `npcDisclosure.ts` |
++| D3 | The narrator receives a perception-filtered digest, not the raw result. It never contains secrets, NPC goals/fears, offscreen NPC actions or faction bookkeeping; a test fails if any appears. | Bible §4 and §10: the narrator must not reveal hidden facts. | `narratorDigest.ts`, store |
++| D4 | All LLM `stateUpdates` are dropped except a validated `locationChange`, which only the new-game opening reads. | Bible §4: narration cannot change state. | `src/ai/validateNarration.ts` |
++| D5 | World events may carry `pace {steps, interval}`; default is unchanged (3 stages, 1 turn apart). | Seeded tensions resolved in about 4 turns, far faster than their authored timescale. | `jianghu.ts`, V4, V5, seed |
++| D6 | Faction `internalTension` cools 1 every third turn and not at all while the faction is in an active event (was: -1 every turn). | The old rule always drained tension to 0, so slow-burn pressure could not build. **Changes tuning for every game.** | `tickJianghu` |
++| D7 | Finales are serializable data on world events, evaluated deterministically when a chain completes; the event then ends. Engine never imports content. | Bible §2.2, §9: state changes later scenes; keeps saves self-contained. | `finale.ts`, V4, content |
++| D8 | A finale witnessed by the player (present at the event's location) becomes an `observation` knowledge record; otherwise the player is only told through rumors at named locations. | Bible §10: the player knows only what they could learn. | `finale.ts`, digest |
++| D9 | If the narrator fails or is unavailable, the resolved turn is committed anyway with a deterministic account and deterministic choices. | Bible §4 (previously the turn was lost). | store `narrateResolvedTurn`, `fallbackNarrator.ts` |
++| D10 | The narrator's choices are filtered to what the rules can honour and backfilled by a deterministic generator. | Bible §13 choice-generator contract. | `choiceGenerator.ts` |
++| D11 | Rolls come from a saved seed and draw counter (`world.rng`); roll N = f(seed, N). Older saves get a seed on their first action. | Bible §4: reproducible bug reports. | `rng.ts`, `actionPipeline.ts`, `validateState` |
++
++## Open decisions (not made)
++- **V5 causal branching is never reached in live play** (V4 sets the shared timer first). Activating it changes outcomes: its default branch for low-severity faction events is "de-escalate", which would end disputes early. Recommendation: do not activate until finales cover the branches it would otherwise decide.
++- **Time model** (hour/date/season/weather, travel duration from the weighted map): Bible §11, absent.
++- **Defeat model** to replace `revive()`: capture, ransom, forced debt, scar, per Bible §7.
++- **Resolver depth**: techniques, Qi cost, mastery and counters.
+diff --git a/src/ai/choiceGenerator.ts b/src/ai/choiceGenerator.ts
+new file mode 100644
+index 0000000..daef260
+--- /dev/null
++++ b/src/ai/choiceGenerator.ts
+@@ -0,0 +1,97 @@
++import { chainPace } from '../engine/jianghu';
++import { interpretPlayerAction } from '../engine/actionInterpreter';
++import type { ProposedAction, RiskLevel, SimulationState } from '../engine/types';
++import type { NarrationChoice } from './validateNarration';
++
++/**
++ * Deterministic choice generator (Game Bible sections 12-13): five contextual
++ * suggestions drawn from what the player can see and legally do right now. It is
++ * the safe fallback when the narrator is unavailable, and it backfills any choice
++ * the narrator proposes that the rules could not honour (for example travel to a
++ * place that does not exist).
++ */
++export interface ChoiceContext {
++  /** Locations reachable from `locationId`, with travel time in days. */
++  neighbours?: (locationId: string) => Array<{ id: string; days: number }>;
++  /** Inspectable points of interest at a location. */
++  features?: (locationId: string) => string[];
++}
++
++export interface ChoiceCandidate extends NarrationChoice { intendedKind: ProposedAction['kind'] }
++
++const CHOICE_COUNT = 5;
++
++/** Ordered, de-duplicated candidates; the first five are the suggestions. Pure. */
++export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}): ChoiceCandidate[] {
++  const here = state.character.locationId;
++  const jianghu = state.jianghu;
++  const out: ChoiceCandidate[] = [];
++  const add = (text: string, risk: RiskLevel, intendedKind: ProposedAction['kind']) => {
++    if (!out.some(c => c.text.toLowerCase() === text.toLowerCase())) out.push({ id: 0, text, risk, intendedKind });
++  };
++
++  // 1. Something public here is about to come to a head: invite the player to be present for it.
++  const imminent = jianghu?.worldEvents.some(w => {
++    if (!w.active || !w.finale || w.locationId !== here) return false;
++    const chain = jianghu.causalChains?.find(c => c.rootEventId === w.id && c.active);
++    if (!chain) return false;
++    const pace = chainPace(w);
++    const turnsLeft = Math.max(0, chain.nextCheckTurn - state.world.turn) + Math.max(0, pace.steps - chain.step - 1) * pace.interval;
++    return turnsLeft <= 10;
++  });
++  if (imminent) add('Watch and listen closely to see how things unfold here', 'low', 'inspect');
++
++  // 2. People present, those with news the player has not heard first.
++  const playerId = state.character.id;
++  const present = (jianghu?.npcs ?? []).filter(n => n.alive && n.locationId === here);
++  const hasNews = (id: string) => jianghu!.rumors.some(r => r.knownBy.includes(id) && !r.knownBy.includes(playerId));
++  const people = [...present].sort((a, b) => Number(hasNews(b.id)) - Number(hasNews(a.id)) || a.id.localeCompare(b.id));
++  if (people[0]) add(`Talk to ${people[0].name}`, 'low', 'talk');
++
++  // 3. A feature of the place, rotating with time so repeat visits offer something new.
++  const features = ctx.features?.(here) ?? [];
++  if (features.length) add(`Inspect the ${features[state.world.turn % features.length]}`, 'low', 'inspect');
++
++  // 4. Somewhere to go: nearest first.
++  const roads = (ctx.neighbours?.(here) ?? []).filter(r => state.world.locationIds.includes(r.id)).sort((a, b) => a.days - b.days || a.id.localeCompare(b.id));
++  const risk = (days: number): RiskLevel => (days >= 3 ? 'high' : days === 2 ? 'medium' : 'low');
++  if (roads[0]) add(`Travel to ${roads[0].id}`, risk(roads[0].days), 'travel');
++
++  // 5. More of the above, then looking after yourself.
++  if (people[1]) add(`Talk to ${people[1].name}`, 'low', 'talk');
++  if (roads[1]) add(`Travel to ${roads[1].id}`, risk(roads[1].days), 'travel');
++  if (features.length > 1) add(`Inspect the ${features[(state.world.turn + 1) % features.length]}`, 'low', 'inspect');
++  const worn = state.character.fatigue >= 40 || state.character.hp < state.character.maxHp;
++  add(worn ? 'Rest and recover your strength' : 'Meditate quietly to steady your Qi', 'low', worn ? 'rest' : 'meditate');
++  add(worn ? 'Meditate quietly to steady your Qi' : 'Rest and recover your strength', 'low', worn ? 'meditate' : 'rest');
++  for (const p of people.slice(2)) add(`Talk to ${p.name}`, 'low', 'talk');
++  for (const r of roads.slice(2)) add(`Travel to ${r.id}`, risk(r.days), 'travel');
++  return out;
++}
++
++export function generateChoices(state: SimulationState, ctx: ChoiceContext = {}): NarrationChoice[] {
++  return choiceCandidates(state, ctx).slice(0, CHOICE_COUNT).map((c, i) => ({ id: i + 1, text: c.text, risk: c.risk }));
++}
++
++/** Would the rules be able to honour this suggestion? Pure, never throws. */
++export function isHonourable(text: string, risk: RiskLevel, state: SimulationState): boolean {
++  try {
++    const action = interpretPlayerAction(text, state, risk);
++    if (action.kind === 'travel' && !action.destinationId) return false;
++    if (action.kind === 'travel' && action.destinationId === state.character.locationId) return false;
++    return true;
++  } catch {
++    return false;
++  }
++}
++
++/** Keep the narrator's suggestions the rules can honour; backfill the rest from the generator. */
++export function mergeChoices(proposed: NarrationChoice[], state: SimulationState, ctx: ChoiceContext = {}): NarrationChoice[] {
++  const kept = proposed.filter(c => isHonourable(c.text, c.risk, state));
++  const seen = new Set(kept.map(c => c.text.toLowerCase()));
++  for (const candidate of choiceCandidates(state, ctx)) {
++    if (kept.length >= CHOICE_COUNT) break;
++    if (!seen.has(candidate.text.toLowerCase())) { seen.add(candidate.text.toLowerCase()); kept.push(candidate); }
++  }
++  return kept.slice(0, CHOICE_COUNT).map((c, i) => ({ id: i + 1, text: c.text, risk: c.risk }));
++}
+diff --git a/src/ai/fallbackNarrator.ts b/src/ai/fallbackNarrator.ts
+new file mode 100644
+index 0000000..0a886ce
+--- /dev/null
++++ b/src/ai/fallbackNarrator.ts
+@@ -0,0 +1,58 @@
++import type { ActionResolution, ResolutionStatus, StateEvent } from '../engine/types';
++
++export interface FallbackNarratorOptions {
++  /** Observable description of a place, keyed by location id (content layer). */
++  locationNotes?: Record<string, string>;
++}
++
++const OPENERS: Record<ResolutionStatus, string[]> = {
++  success: ['It goes as you hoped.', 'Things fall into place.'],
++  partial: ['It goes only partly as you hoped.', 'You manage some of it, at a cost.'],
++  failure: ['It does not go as you hoped.', 'The attempt comes to nothing.'],
++  blocked: ['You cannot do that here.', 'Nothing comes of it; the way is closed.'],
++};
++
++const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
++const firstSentence = (text: string) => (text.match(/^.*?[.!?](?:\s|$)/)?.[0] ?? text).trim();
++
++/**
++ * A plain-prose account of one resolved turn, built only from the authoritative
++ * result (Game Bible section 4: if the model is unavailable the simulation still
++ * runs and a safe fallback narrator describes it). Deterministic, no LLM, and it
++ * speaks only of what the player perceived, exactly like the narrator digest.
++ */
++export function fallbackNarration(resolution: ActionResolution, options: FallbackNarratorOptions = {}): string {
++  const { state, action, events, status } = resolution;
++  const playerId = state.character.id;
++  const witnessed = (e: StateEvent) => e.witnesses?.includes(playerId) ?? false;
++  const npcName = (id?: string) => state.jianghu?.npcs.find(n => n.id === id)?.name ?? 'Someone';
++  const variants = OPENERS[status];
++  const parts: string[] = [`${action.description.replace(/[.!?]+$/, '')}. ${variants[state.world.turn % variants.length]}`];
++
++  for (const e of events) {
++    if (e.type === 'world.location_changed' && witnessed(e)) {
++      const to = str(e.payload.to) ?? state.character.locationId;
++      const note = options.locationNotes?.[to];
++      parts.push(`You arrive at ${to}.${note ? ` ${firstSentence(note)}` : ''}`);
++    } else if (e.type === 'world.fact_discovered' && witnessed(e)) {
++      const fact = str(e.payload.fact); const via = str(e.payload.via);
++      if (fact?.startsWith('inspected:')) parts.push(`You study ${fact.slice('inspected:'.length)} closely.`);
++      else if (fact && via) parts.push(`${npcName(via)} tells you what is being said: ${fact} You cannot yet tell how much of it is true.`);
++      else if (fact) parts.push(`You learn something, though you cannot yet be sure of it: ${fact}`);
++    } else if (e.type === 'world.finale_resolved' && witnessed(e)) {
++      parts.push(`${str(e.payload.headline) ?? ''} ${str(e.payload.description) ?? ''}`.trim());
++    } else if (e.type === 'character.injury_added') {
++      parts.push(`You are hurt: a minor ${str(e.payload.bodyRegion) ?? 'physical'} injury.`);
++    }
++  }
++
++  if (action.kind === 'talk' && action.targetId && (status === 'success' || status === 'partial')
++      && !events.some(e => e.type === 'world.fact_discovered' && e.payload.via === action.targetId)) {
++    parts.push(`${npcName(action.targetId)} has little new to say; you trade courtesies.`);
++  }
++
++  const here = state.character.locationId;
++  const others = (state.jianghu?.npcs ?? []).filter(n => n.alive && n.locationId === here).map(n => n.name);
++  if (others.length) parts.push(`Around you in ${here}: ${others.join(', ')}.`);
++  return parts.join('\n\n');
++}
+diff --git a/src/engine/actionPipeline.ts b/src/engine/actionPipeline.ts
+index eecaf93..e53592a 100644
+--- a/src/engine/actionPipeline.ts
++++ b/src/engine/actionPipeline.ts
+@@ -3,6 +3,7 @@ import type { ActionResolution, RiskLevel } from './types';
+ import { interpretPlayerAction } from './actionInterpreter';
+ import { enterSimulationBoundary, exitSimulationBoundary } from './simulationBoundary';
+ import { resolveAction } from './resolveAction';
++import { consumeDraw, randomSeed, rollAt } from './rng';
+ 
+ export interface PreparedPlayerAction {
+   resolution: ActionResolution;
+@@ -19,13 +20,18 @@ export function resolvePlayerAction(
+   gameState: GameState,
+   description: string,
+   risk: RiskLevel = 'medium',
+-  roll: number = Math.floor(Math.random() * 100),
++  /** Explicit roll (tests, replays). When omitted the roll comes from the saved seed. */
++  roll?: number,
+ ): PreparedPlayerAction {
+   if (!gameState.character) throw new Error('Cannot resolve an action without a character.');
+ 
+   const simulation = enterSimulationBoundary(gameState, [gameState.location]);
++  // Saves from before seeded rolls get a seed on their first action; from then on every roll is replayable.
++  const rng = simulation.world.rng ?? { seed: randomSeed(), draws: 0 };
+   const action = interpretPlayerAction(description, simulation, risk);
+-  const resolution = resolveAction(simulation, action, roll);
++  const resolution = resolveAction(simulation, action, roll ?? rollAt(rng.seed, rng.draws));
++  // An explicit roll consumes nothing, so a replay that injects rolls does not disturb the saved sequence.
++  resolution.state.world.rng = roll === undefined ? consumeDraw(rng) : rng;
+   const nextGameState = exitSimulationBoundary(gameState, resolution.state);
+ 
+   return { resolution, nextGameState };
+diff --git a/src/engine/finale.ts b/src/engine/finale.ts
+new file mode 100644
+index 0000000..2fd8148
+--- /dev/null
++++ b/src/engine/finale.ts
+@@ -0,0 +1,271 @@
++import type { GoalKind, JianghuState, KnowledgeRecord, RumorState, WorldEventState } from './jianghu';
++import type { SimulationState, StateEvent } from './types';
++
++/**
++ * Finale hooks: the authored (or generated) payoff when a world event's causal
++ * chain runs its course.
++ *
++ * A finale is plain, serializable data attached to a `WorldEventState`. The
++ * engine evaluates its conditions against the CURRENT world state, picks the
++ * first outcome whose conditions all hold, and applies that outcome's effects.
++ * No randomness and no LLM are involved, so the same state always yields the
++ * same outcome (Game Bible section 4), and because it is data it survives
++ * save/load. Content lives in `src/world/content`; the engine never imports it.
++ */
++
++export type FinaleCondition =
++  | { kind: 'player_at'; locationId: string }
++  | { kind: 'player_knows_rumor'; rumorId: string }
++  | { kind: 'faction_tension_at_least'; factionId: string; value: number }
++  | { kind: 'faction_tension_below'; factionId: string; value: number }
++  | { kind: 'faction_hostility_at_least'; factionAId: string; factionBId: string; value: number }
++  | { kind: 'npc_alive'; npcId: string }
++  | { kind: 'npc_disposition_at_least'; npcId: string; value: number }
++  | { kind: 'npc_disposition_below'; npcId: string; value: number }
++  | { kind: 'market_scarcity_at_least'; locationId: string; good: string; value: number };
++
++export interface FinaleGoalSpec {
++  id: string;
++  kind: GoalKind;
++  description: string;
++  priority: number;
++  targetId?: string;
++}
++
++export type FinaleEffect =
++  | { kind: 'adjust_faction'; factionId: string; tension?: number; influence?: number; resources?: number; playerReputation?: number }
++  | { kind: 'adjust_faction_relation'; factionAId: string; factionBId: string; trust?: number; hostility?: number; trade?: number }
++  | { kind: 'adjust_npc'; npcId: string; disposition?: number; resources?: number; moveTo?: string }
++  | { kind: 'add_npc_goal'; npcId: string; goal: FinaleGoalSpec; retireOthers?: boolean }
++  | { kind: 'adjust_market'; locationId: string; scarcity: Record<string, number> }
++  | { kind: 'spread_rumor'; id: string; text: string; origin: string; locationIds: string[]; credibility: number }
++  | { kind: 'start_event'; event: Omit<WorldEventState, 'active' | 'createdTurn'> };
++
++export interface FinaleOutcome {
++  id: string;
++  /** One line: what happened (what a witness would say). */
++  headline: string;
++  /** One or two sentences of observable detail for the narrator. */
++  description: string;
++  /** All must hold. An outcome with no conditions always matches, so put it last. */
++  when: FinaleCondition[];
++  effects: FinaleEffect[];
++}
++
++export interface FinaleSpec {
++  outcomes: FinaleOutcome[];
++}
++
++const clamp = (v: number, min = 0, max = 100) => Math.max(min, Math.min(max, v));
++const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
++
++/** Evaluate a single condition against the current state. Unknown ids make a condition false. */
++export function conditionHolds(c: FinaleCondition, j: JianghuState, sim: SimulationState): boolean {
++  switch (c.kind) {
++    case 'player_at':
++      return sim.character.locationId === c.locationId;
++    case 'player_knows_rumor':
++      return (sim.world.knownRumorIds ?? []).includes(c.rumorId)
++        || (j.rumors.find(r => r.id === c.rumorId)?.knownBy.includes(sim.character.id) ?? false);
++    case 'faction_tension_at_least': {
++      const f = j.factions.find(x => x.id === c.factionId);
++      return !!f && f.internalTension >= c.value;
++    }
++    case 'faction_tension_below': {
++      const f = j.factions.find(x => x.id === c.factionId);
++      return !!f && f.internalTension < c.value;
++    }
++    case 'faction_hostility_at_least': {
++      const r = (j.factionRelations ?? []).find(x =>
++        (x.factionAId === c.factionAId && x.factionBId === c.factionBId) || (x.factionAId === c.factionBId && x.factionBId === c.factionAId));
++      return !!r && r.hostility >= c.value;
++    }
++    case 'npc_alive':
++      return j.npcs.some(n => n.id === c.npcId && n.alive);
++    case 'npc_disposition_at_least': {
++      const n = j.npcs.find(x => x.id === c.npcId);
++      return !!n && n.alive && n.disposition >= c.value;
++    }
++    case 'npc_disposition_below': {
++      const n = j.npcs.find(x => x.id === c.npcId);
++      return !!n && n.alive && n.disposition < c.value;
++    }
++    case 'market_scarcity_at_least': {
++      const m = j.markets?.find(x => x.locationId === c.locationId);
++      return !!m && (m.scarcity[c.good] ?? 0) >= c.value;
++    }
++  }
++}
++
++/** The first outcome whose conditions all hold, or undefined. Pure. */
++export function selectFinaleOutcome(spec: FinaleSpec, j: JianghuState, sim: SimulationState): FinaleOutcome | undefined {
++  return spec.outcomes.find(o => o.when.every(c => conditionHolds(c, j, sim)));
++}
++
++/** Apply one effect in place. Returns false when it referenced something that does not exist. */
++function applyEffect(e: FinaleEffect, j: JianghuState, sim: SimulationState, turn: number): boolean {
++  switch (e.kind) {
++    case 'adjust_faction': {
++      const f = j.factions.find(x => x.id === e.factionId);
++      if (!f) return false;
++      if (e.tension) f.internalTension = clamp(f.internalTension + e.tension);
++      if (e.influence) f.influence = clamp(f.influence + e.influence);
++      if (e.resources) f.resources = clamp(f.resources + e.resources);
++      if (e.playerReputation) f.playerReputation = clamp(f.playerReputation + e.playerReputation, -100, 100);
++      return true;
++    }
++    case 'adjust_faction_relation': {
++      const r = (j.factionRelations ?? []).find(x =>
++        (x.factionAId === e.factionAId && x.factionBId === e.factionBId) || (x.factionAId === e.factionBId && x.factionBId === e.factionAId));
++      if (!r) return false;
++      if (e.trust) r.trust = clamp(r.trust + e.trust, -100, 100);
++      if (e.hostility) r.hostility = clamp(r.hostility + e.hostility);
++      if (e.trade) r.trade = clamp(r.trade + e.trade);
++      return true;
++    }
++    case 'adjust_npc': {
++      const n = j.npcs.find(x => x.id === e.npcId);
++      if (!n || !n.alive) return false;
++      if (e.disposition) n.disposition = clamp(n.disposition + e.disposition, -100, 100);
++      if (e.resources) n.resources = clamp(n.resources + e.resources);
++      if (e.moveTo) {
++        if (!sim.world.locationIds.includes(e.moveTo)) return false;
++        n.locationId = e.moveTo;
++      }
++      return true;
++    }
++    case 'add_npc_goal': {
++      const n = j.npcs.find(x => x.id === e.npcId);
++      if (!n || !n.alive) return false;
++      if (e.retireOthers) for (const g of n.goals) g.active = false;
++      n.goals = n.goals.filter(g => g.id !== e.goal.id);
++      n.goals.push({ ...e.goal, priority: clamp(e.goal.priority), progress: 0, active: true });
++      return true;
++    }
++    case 'adjust_market': {
++      const m = j.markets?.find(x => x.locationId === e.locationId);
++      if (!m) return false;
++      for (const [good, delta] of Object.entries(e.scarcity)) {
++        if (!(good in m.scarcity)) continue;
++        m.scarcity[good] = clamp(m.scarcity[good] + delta);
++        m.priceMultipliers[good] = Number((1 + m.scarcity[good] / 100).toFixed(2));
++      }
++      m.lastUpdatedTurn = turn;
++      return true;
++    }
++    case 'spread_rumor': {
++      let created = false;
++      for (const locationId of e.locationIds) {
++        if (!sim.world.locationIds.includes(locationId)) continue;
++        const id = `${e.id}-${slug(locationId)}`;
++        if (j.rumors.some(r => r.id === id)) continue;
++        const witnesses = j.npcs.filter(n => n.alive && n.locationId === locationId).map(n => n.id);
++        const rumor: RumorState = {
++          id, text: e.text, origin: e.origin, currentLocationId: locationId,
++          status: e.credibility >= 60 ? 'plausible' : 'unverified',
++          credibility: clamp(e.credibility), knownBy: witnesses, createdTurn: turn, spreadRate: 1,
++        };
++        j.rumors.push(rumor);
++        created = true;
++      }
++      return created;
++    }
++    case 'start_event': {
++      if (j.worldEvents.some(w => w.id === e.event.id)) return false;
++      if (j.causalChains?.some(c => c.rootEventId === e.event.id)) return false;
++      j.worldEvents.push({ ...JSON.parse(JSON.stringify(e.event)), active: true, createdTurn: turn });
++      return true;
++    }
++  }
++}
++
++export interface FinaleResult {
++  outcome?: FinaleOutcome;
++  event?: StateEvent;
++}
++
++/**
++ * Resolve `worldEvent`'s finale in place on `j` (callers pass a working copy).
++ * The event ends (`active = false`) whether or not an outcome matched, so a
++ * finale can never fire twice. Returns the structured event for the ledger.
++ */
++export function applyFinale(j: JianghuState, sim: SimulationState, worldEvent: WorldEventState): FinaleResult {
++  const spec = worldEvent.finale;
++  if (!spec) return {};
++  worldEvent.active = false;
++
++  const outcome = selectFinaleOutcome(spec, j, sim);
++  if (!outcome) return {};
++
++  const turn = sim.world.turn;
++  const playerId = sim.character.id;
++  const present = !!worldEvent.locationId && sim.character.locationId === worldEvent.locationId;
++  // Witness set is computed before effects so a move-away effect cannot erase who saw the moment.
++  const onlookers = present && worldEvent.locationId
++    ? j.npcs.filter(n => n.alive && n.locationId === worldEvent.locationId).map(n => n.id)
++    : [];
++
++  let applied = 0; let skipped = 0;
++  for (const effect of outcome.effects) (applyEffect(effect, j, sim, turn) ? applied++ : skipped++);
++
++  if (present) {
++    const record: KnowledgeRecord = {
++      id: `knowledge-finale-${worldEvent.id}-${playerId}`,
++      subjectId: playerId, fact: outcome.headline, sourceId: worldEvent.id, sourceKind: 'observation',
++      confidence: 95, discoveredTurn: turn, lastVerifiedTurn: turn, trueState: 'true',
++    };
++    j.knowledgeRecords = [...(j.knowledgeRecords ?? []).filter(k => k.id !== record.id), record];
++    j.knowledgeVersion += 1;
++    // Anyone who saw it can say so; rumors spread at the site already list the witnesses.
++    for (const r of j.rumors) if (r.createdTurn === turn && r.currentLocationId === worldEvent.locationId && !r.knownBy.includes(playerId)) r.knownBy.push(playerId);
++    sim.world.knownRumorIds = Array.from(new Set([
++      ...(sim.world.knownRumorIds ?? []),
++      ...j.rumors.filter(r => r.knownBy.includes(playerId)).map(r => r.id),
++    ]));
++  }
++
++  const event: StateEvent = {
++    type: 'world.finale_resolved',
++    causes: [`world-event:${worldEvent.id}`, `finale-outcome:${outcome.id}`, `causal-chain:chain-${worldEvent.id}:completion`],
++    witnesses: present ? [playerId, ...onlookers] : [],
++    knowledgeConsequences: present ? [`player:fact:${outcome.headline}`] : [],
++    causalLinks: [worldEvent.id],
++    payload: {
++      eventId: worldEvent.id, outcomeId: outcome.id, headline: outcome.headline, description: outcome.description,
++      locationId: worldEvent.locationId ?? null, witnessedByPlayer: present, effectsApplied: applied, effectsSkipped: skipped,
++    },
++  };
++  return { outcome, event };
++}
++
++/** Structural problems in a finale spec (used by content tests and any future generator). */
++export function validateFinaleSpec(spec: FinaleSpec, j: JianghuState, locationIds: string[]): string[] {
++  const issues: string[] = [];
++  const npc = (id: string) => j.npcs.some(n => n.id === id);
++  const faction = (id: string) => j.factions.some(f => f.id === id);
++  if (!spec.outcomes.length) issues.push('finale has no outcomes');
++  const ids = new Set<string>();
++  spec.outcomes.forEach((o, i) => {
++    if (ids.has(o.id)) issues.push(`duplicate outcome id ${o.id}`);
++    ids.add(o.id);
++    if (!o.headline.trim() || !o.description.trim()) issues.push(`${o.id}: headline/description required`);
++    if (i === spec.outcomes.length - 1 && o.when.length) issues.push(`${o.id}: last outcome must be unconditional`);
++    for (const c of o.when) {
++      if ('factionId' in c && !faction(c.factionId)) issues.push(`${o.id}: unknown faction ${c.factionId}`);
++      if (c.kind === 'faction_hostility_at_least' && !(faction(c.factionAId) && faction(c.factionBId))) issues.push(`${o.id}: unknown faction in hostility check`);
++      if ('npcId' in c && !npc(c.npcId)) issues.push(`${o.id}: unknown npc ${c.npcId}`);
++      if ('locationId' in c && !locationIds.includes(c.locationId)) issues.push(`${o.id}: unknown location ${c.locationId}`);
++      if (c.kind === 'player_knows_rumor' && !j.rumors.some(r => r.id === c.rumorId)) issues.push(`${o.id}: unknown rumor ${c.rumorId}`);
++    }
++    for (const e of o.effects) {
++      if ('factionId' in e && !faction(e.factionId)) issues.push(`${o.id}: unknown faction ${e.factionId}`);
++      if (e.kind === 'adjust_faction_relation' && !(faction(e.factionAId) && faction(e.factionBId))) issues.push(`${o.id}: unknown faction in relation`);
++      if ('npcId' in e && !npc(e.npcId)) issues.push(`${o.id}: unknown npc ${e.npcId}`);
++      if (e.kind === 'adjust_npc' && e.moveTo && !locationIds.includes(e.moveTo)) issues.push(`${o.id}: unknown moveTo ${e.moveTo}`);
++      if (e.kind === 'adjust_market' && !j.markets?.some(m => m.locationId === e.locationId)) issues.push(`${o.id}: no market at ${e.locationId}`);
++      if (e.kind === 'spread_rumor') e.locationIds.forEach(l => { if (!locationIds.includes(l)) issues.push(`${o.id}: unknown rumor location ${l}`); });
++      if (e.kind === 'start_event' && e.event.finale) issues.push(...validateFinaleSpec(e.event.finale, j, locationIds).map(m => `${o.id} > ${e.event.id}: ${m}`));
++    }
++  });
++  return issues;
++}
+diff --git a/src/engine/jianghu.ts b/src/engine/jianghu.ts
+index 0c3189d..648da46 100644
+--- a/src/engine/jianghu.ts
++++ b/src/engine/jianghu.ts
+@@ -1,4 +1,5 @@
+ import type { ProposedAction, SimulationState, StateEvent } from './types';
++import type { FinaleSpec } from './finale';
+ 
+ export type MemoryValence = 'positive' | 'negative' | 'neutral';
+ export type RumorStatus = 'unverified' | 'plausible' | 'confirmed' | 'false';
+@@ -108,6 +109,8 @@ export interface WorldEventState {
+    * Omitted means the original behaviour: 3 stages, one per turn.
+    */
+   pace?: { steps: number; interval: number };
++  /** Payoff applied when this event's causal chain completes (see finale.ts). The event ends with it. */
++  finale?: FinaleSpec;
+ }
+ 
+ /** Normalised, bounded chain pacing for a world event. */
+diff --git a/src/engine/jianghuInformationV4.ts b/src/engine/jianghuInformationV4.ts
+index 4c6809c..6852bfd 100644
+--- a/src/engine/jianghuInformationV4.ts
++++ b/src/engine/jianghuInformationV4.ts
+@@ -1,4 +1,5 @@
+ import type { SimulationState, StateEvent } from './types';
++import { applyFinale } from './finale';
+ import { chainPace } from './jianghu';
+ import type { JianghuState, KnowledgeRecord, CausalChainState, NPCState, RumorState } from './jianghu';
+ 
+@@ -198,6 +199,11 @@ export function advanceCausalChains(
+         type: 'world.causal_chain_completed',
+         causes: [`causal-chain:${chain.id}:completion`, `root-event:${chain.rootEventId}`], causalLinks: [chain.rootEventId], payload: { chainId: chain.id, rootEventId: chain.rootEventId },
+       });
++      // A completed chain with an authored finale pays off now and ends its event.
++      if (worldEvent.finale) {
++        const finale = applyFinale(j, simulation, worldEvent);
++        if (finale.event) events.push(finale.event);
++      }
+     }
+   }
+ 
+diff --git a/src/engine/narratorDigest.ts b/src/engine/narratorDigest.ts
+index 4395884..66c9b9b 100644
+--- a/src/engine/narratorDigest.ts
++++ b/src/engine/narratorDigest.ts
+@@ -1,3 +1,4 @@
++import { chainPace } from './jianghu';
+ import type { ActionResolution, StateEvent } from './types';
+ 
+ export interface NarratorDigestOptions {
+@@ -58,6 +59,9 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
+         }
+         break;
+       }
++      case 'world.finale_resolved':
++        if (witnessed(e)) happened.push(`A decisive moment unfolded before you: ${str(e.payload.headline)} ${str(e.payload.description) ?? ''}`.trim());
++        break;
+       case 'character.social_changed':
+         if (witnessed(e) && action.kind === 'talk') happened.push(`The conversation went well; ${npcName(action.targetId)} warmed to you slightly.`);
+         break;
+@@ -102,7 +106,16 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
+       lines.push('', 'Public situation here (visible to anyone present):');
+       for (const w of conditions) {
+         const step = advanced.get(w.id);
+-        lines.push(`- ${w.title}: ${w.description}${step ? ` Tension is building (stage ${step}).` : ''}`);
++        const chain = jianghu.causalChains?.find(c => c.rootEventId === w.id && c.active);
++        let horizon = '';
++        if (chain && w.finale) {
++          const pace = chainPace(w);
++          const turnsLeft = Math.max(0, chain.nextCheckTurn - state.world.turn) + Math.max(0, pace.steps - chain.step - 1) * pace.interval;
++          // Fuzzy on purpose: the narrator hints, it never quotes a countdown.
++          if (turnsLeft <= 3) horizon = ' It looks set to come to a head very soon.';
++          else if (turnsLeft <= 10) horizon = ' It looks likely to come to a head before long.';
++        }
++        lines.push(`- ${w.title}: ${w.description}${step ? ` Tension is building (stage ${step}).` : ''}${horizon}`);
+       }
+     }
+   }
+diff --git a/src/engine/rng.ts b/src/engine/rng.ts
+new file mode 100644
+index 0000000..fe0b96a
+--- /dev/null
++++ b/src/engine/rng.ts
+@@ -0,0 +1,38 @@
++import type { SimulationState } from './types';
++
++/**
++ * Replayable randomness (Game Bible section 4: "use injected random-number
++ * generation for tests and reproducible bug reports").
++ *
++ * The seed and a draw counter live in `SimulationState.world.rng`, so they are
++ * saved with the game. Roll N of a game is a pure function of (seed, N): given
++ * the seed and the ordered list of player actions, any turn can be replayed
++ * exactly. Nothing here calls Math.random; the only entropy enters when the
++ * seed is first chosen, at the product boundary.
++ */
++export interface RngState { seed: number; draws: number }
++
++/** Deterministic roll in 0..99 for (seed, draw). Integer hash (murmur-style finaliser), no state. */
++export function rollAt(seed: number, draw: number): number {
++  let h = (seed ^ Math.imul(draw + 1, 0x9e3779b1)) >>> 0;
++  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
++  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
++  h = (h ^ (h >>> 16)) >>> 0;
++  return h % 100;
++}
++
++/** A fresh 32-bit seed from the platform. Call only at the product boundary, never inside the engine. */
++export function randomSeed(): number {
++  return Math.floor(Math.random() * 0x100000000) >>> 0;
++}
++
++/** The roll the next action will use, without consuming it. */
++export function peekRoll(state: SimulationState): number | undefined {
++  const rng = state.world.rng;
++  return rng ? rollAt(rng.seed, rng.draws) : undefined;
++}
++
++/** The state with one draw consumed. Pure: returns the new rng value. */
++export function consumeDraw(rng: RngState): RngState {
++  return { seed: rng.seed, draws: rng.draws + 1 };
++}
+diff --git a/src/engine/types.ts b/src/engine/types.ts
+index a181456..46998d8 100644
+--- a/src/engine/types.ts
++++ b/src/engine/types.ts
+@@ -58,6 +58,8 @@ export interface SimWorld {
+   /** Player-known information only; world truth remains in jianghu. */
+   knownRumorIds?: string[];
+   knownNpcIds?: string[];
++  /** Saved seed and draw counter for replayable rolls (see rng.ts). Absent on older saves. */
++  rng?: { seed: number; draws: number };
+ }
+ 
+ export interface SimulationState {
+@@ -116,6 +118,7 @@ export interface StateEvent {
+     | 'world.npc_action'
+     | 'world.causal_chain_advanced'
+     | 'world.causal_chain_completed'
++    | 'world.finale_resolved'
+     | 'world.causal_branch_selected'
+     | 'world.faction_reaction'
+     | 'world.location_reaction';
+diff --git a/src/engine/validateState.ts b/src/engine/validateState.ts
+index c15a147..ba3deac 100644
+--- a/src/engine/validateState.ts
++++ b/src/engine/validateState.ts
+@@ -23,6 +23,10 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
+   if (!Number.isFinite(c.fatigue) || c.fatigue < 0 || c.fatigue > 100) {
+     issues.push({ path: 'character.fatigue', message: 'Fatigue must be within 0..100.' });
+   }
++  const rng = state.world.rng;
++  if (rng && !(Number.isInteger(rng.seed) && rng.seed >= 0 && rng.seed <= 0xffffffff && Number.isInteger(rng.draws) && rng.draws >= 0)) {
++    issues.push({ path: 'world.rng', message: 'rng must hold an integer 32-bit seed and a non-negative integer draw count.' });
++  }
+   if (!state.world.locationIds.includes(c.locationId)) {
+     issues.push({ path: 'character.locationId', message: 'Current location must exist in world.locationIds.' });
+   }
+diff --git a/src/services/llmService.ts b/src/services/llmService.ts
+index dabca36..15e8017 100644
+--- a/src/services/llmService.ts
++++ b/src/services/llmService.ts
+@@ -264,6 +264,7 @@ async function narrate(config: LLMConfig, messages: Array<{ role: string; conten
+     console.warn('Narrator output unusable, retrying once:', validation.issues);
+     validation = parseNarration(await callProvider(config, messages));
+   }
++  if (validation.narrativeIsFallback) throw new Error('The narrator returned no usable text.');
+   if (validation.issues.length) console.warn('Narrator output repaired:', validation.issues);
+   return validation.result;
+ }
+diff --git a/src/store/gameStore.ts b/src/store/gameStore.ts
+index b8b330a..baa1b6f 100644
+--- a/src/store/gameStore.ts
++++ b/src/store/gameStore.ts
+@@ -11,7 +11,10 @@ import { soundManager } from '../services/soundManager';
+ import { resolvePlayerAction } from '../engine/actionPipeline';
+ import { createSimulationState } from '../engine/simulationAdapter';
+ import { buildNarratorDigest } from '../engine/narratorDigest';
+-import { FANTASY_PRESETS, buildDigestOptions, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
++import { randomSeed } from '../engine/rng';
++import { fallbackNarration } from '../ai/fallbackNarrator';
++import { generateChoices, mergeChoices } from '../ai/choiceGenerator';
++import { FANTASY_PRESETS, buildChoiceContext, buildDigestOptions, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
+ import type { SimulationState } from '../engine/types';
+ 
+ interface GameStore {
+@@ -182,10 +185,50 @@ function resolveOriginStart(character: Character) {
+   if (!origin) return undefined;
+   const preset = FANTASY_PRESETS[(character.fantasyPreset ?? '') as keyof typeof FANTASY_PRESETS] ?? FANTASY_PRESETS.living_legends;
+   const opening = buildOriginOpening(origin);
+-  const simulation: SimulationState = createWuxiaSimulation(origin.id, preset, character.name);
++  const simulation: SimulationState = createWuxiaSimulation(origin.id, preset, character.name, randomSeed());
+   return { origin, opening, simulation, scenario: buildOriginScenario(origin) };
+ }
+ 
++/**
++ * Narrate a resolved turn. The simulation has already decided what happened, so a
++ * narrator failure must never lose the turn (Game Bible section 4): for origin
++ * characters an unavailable model, an unusable reply, or demo mode all fall back
++ * to a deterministic account and deterministic choices. Origin characters' LLM
++ * choices are also checked against what the rules can honour.
++ */
++async function narrateResolvedTurn(args: {
++  isDemo: boolean;
++  config: GameSettings['llmConfig'];
++  resolvedState: GameState;
++  prepared: ReturnType<typeof resolvePlayerAction>;
++  promptAction: string;
++  demoFallback: () => LLMResponse;
++}): Promise<{ response: LLMResponse; notice: string | null }> {
++  const { isDemo, config, resolvedState, prepared, promptAction, demoFallback } = args;
++  const origin = !!resolvedState.character?.originId;
++  const simulation = prepared.resolution.state;
++  const offline = (): LLMResponse => ({
++    narrative: fallbackNarration(prepared.resolution, buildDigestOptions()),
++    choices: generateChoices(simulation, buildChoiceContext()),
++    stateUpdates: {},
++  });
++
++  if (isDemo) return { response: origin ? offline() : demoFallback(), notice: null };
++  try {
++    const response = await generateNarrative(config, resolvedState, promptAction);
++    return {
++      response: origin ? { ...response, choices: mergeChoices(response.choices, simulation, buildChoiceContext()) } : response,
++      notice: null,
++    };
++  } catch (error) {
++    console.error('Narrator unavailable; using the deterministic fallback:', error);
++    return {
++      response: origin ? offline() : demoFallback(),
++      notice: 'The narrator is unavailable, so this turn is shown as a plain account. What happened is unaffected.',
++    };
++  }
++}
++
+ function getDemoOpening(): LLMResponse {
+   const opening = DEMO_OPENINGS[Math.floor(Math.random() * DEMO_OPENINGS.length)];
+   return {
+@@ -351,16 +394,14 @@ export const useGameStore = create<GameStore>()(
+             ? `[Resolved action]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
+             : `[Resolved action: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+ 
+-          let response: LLMResponse;
+-          if (isDemoMode) {
+-            response = getDemoResponse(choiceText);
+-          } else {
+-            response = await generateNarrative(
+-              settings.llmConfig,
+-              resolvedState,
+-              `[Chose option ${choiceId}]: ${choiceText}\n${resolutionContext}`
+-            );
+-          }
++          const { response, notice } = await narrateResolvedTurn({
++            isDemo: isDemoMode,
++            config: settings.llmConfig,
++            resolvedState,
++            prepared,
++            promptAction: `[Chose option ${choiceId}]: ${choiceText}\n${resolutionContext}`,
++            demoFallback: () => getDemoResponse(choiceText),
++          });
+ 
+           const turn: GameTurn = {
+             id: uuidv4(),
+@@ -379,6 +420,7 @@ export const useGameStore = create<GameStore>()(
+           set({
+             gameState: newState,
+             isLoading: false,
++            error: notice,
+           });
+ 
+           try {
+@@ -411,18 +453,18 @@ export const useGameStore = create<GameStore>()(
+         try {
+           const prepared = resolvePlayerAction(gameState, action, 'medium');
+           const resolvedState = prepared.nextGameState;
+-          const resolutionContext = `[Resolved intent: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
++          const resolutionContext = gameState.character?.originId
++            ? `[Resolved intent]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
++            : `[Resolved intent: ${prepared.resolution.status}] ${prepared.resolution.summary}`;
+ 
+-          let response: LLMResponse;
+-          if (isDemoMode) {
+-            response = getDemoResponse(action);
+-          } else {
+-            response = await generateNarrative(
+-              settings.llmConfig,
+-              resolvedState,
+-              `[Intent]: ${action}\n${resolutionContext}`
+-            );
+-          }
++          const { response, notice } = await narrateResolvedTurn({
++            isDemo: isDemoMode,
++            config: settings.llmConfig,
++            resolvedState,
++            prepared,
++            promptAction: `[Intent]: ${action}\n${resolutionContext}`,
++            demoFallback: () => getDemoResponse(action),
++          });
+ 
+           const turn: GameTurn = {
+             id: uuidv4(),
+@@ -442,6 +484,7 @@ export const useGameStore = create<GameStore>()(
+           set({
+             gameState: newState,
+             isLoading: false,
++            error: notice,
+           });
+ 
+           try {
+diff --git a/src/world/content/finales.ts b/src/world/content/finales.ts
+new file mode 100644
+index 0000000..9b2e2bb
+--- /dev/null
++++ b/src/world/content/finales.ts
+@@ -0,0 +1,259 @@
++import type { FinaleEffect, FinaleOutcome, FinaleSpec } from '../../engine/finale';
++
++/**
++ * Authored finales for the seed world events (Game Bible sections 8-10: persistent,
++ * state-driven causality). Each finale picks its outcome from the world state when
++ * the event's chain completes: the player's presence, trust and knowledge can change
++ * it, otherwise the world's own pressure decides. Outcomes can start follow-up
++ * events, so one resolved tension becomes the next.
++ *
++ * Thresholds were calibrated against a 50-turn passive run: Jade Hall tension is
++ * about 53 at the assembly, Black River 30 at the ferry finale, and Willow medicine
++ * scarcity stays at its seeded 36. Passive play therefore reaches the harder outcome;
++ * engaging with the people involved reaches the better one.
++ */
++
++const spread = (id: string, text: string, origin: string, locationIds: string[], credibility: number): FinaleEffect =>
++  ({ kind: 'spread_rumor', id, text, origin, locationIds, credibility });
++
++const outcome = (o: FinaleOutcome): FinaleOutcome => o;
++
++// ---------------------------------------------------------------- Jade Hall
++
++const GU_WEN_PURSUIT: FinaleSpec = {
++  outcomes: [outcome({
++    id: 'gu-wen-retrieved',
++    headline: 'Jade Hall disciples run Gu Wen to ground on Cloudstep Peak and bring him back with what remains of the stolen volume.',
++    description: 'Gu Wen is marched down the mountain under guard, silent, the wrapped manuscript carried before him.',
++    when: [],
++    effects: [
++      { kind: 'adjust_npc', npcId: 'npc-gu-wen', moveTo: 'Jade Hall', disposition: -5 },
++      { kind: 'add_npc_goal', npcId: 'npc-gu-wen', retireOthers: true, goal: { id: 'goal-penance', kind: 'rest', description: 'Serve penance in Jade Hall and wait for Elder Bai\'s judgement', priority: 80 } },
++      { kind: 'adjust_faction', factionId: 'faction-jade-hall', tension: -10, influence: 3 },
++      spread('rumor-gu-wen-caught', 'Gu Wen was dragged back to Jade Hall from Cloudstep Peak, and the sect is deciding his punishment.', 'npc-bai-qingshan', ['Jade Hall', 'The Crossroads'], 80),
++    ],
++  })],
++};
++
++const HALL_SCHISM_FOLLOWUP: FinaleSpec = {
++  outcomes: [
++    outcome({
++      id: 'hall-fractures',
++      headline: 'The Jade Hall splits for good: Gu Wen takes his followers to Cloudstep Peak and founds a rival sword school.',
++      description: 'Two banners now hang where there was one; former sworn brothers pass each other on the road without a word.',
++      when: [{ kind: 'faction_tension_at_least', factionId: 'faction-jade-hall', value: 70 }],
++      effects: [
++        { kind: 'adjust_faction', factionId: 'faction-jade-hall', tension: -20, influence: -15, resources: -10 },
++        { kind: 'adjust_faction', factionId: 'faction-crimson-lotus', influence: 4 },
++        { kind: 'add_npc_goal', npcId: 'npc-gu-wen', retireOthers: true, goal: { id: 'goal-found-school', kind: 'train', description: 'Build the Cloudstep Sword School into a rival to Jade Hall', priority: 90 } },
++        spread('rumor-rival-school', 'Gu Wen has founded a rival sword school on Cloudstep Peak, and Jade Hall disciples are leaving to join it.', 'npc-gu-wen', ['Cloudstep Peak', 'Jade Hall', 'The Crossroads'], 85),
++      ],
++    }),
++    outcome({
++      id: 'uneasy-truce',
++      headline: 'Elder Bai and Gu Wen agree to an uneasy truce, and the Hall holds together by a thread.',
++      description: 'The loyalists and the challengers eat in the same hall again, watching one another over their bowls.',
++      when: [],
++      effects: [
++        { kind: 'adjust_faction', factionId: 'faction-jade-hall', tension: -25 },
++        { kind: 'adjust_npc', npcId: 'npc-gu-wen', moveTo: 'Jade Hall' },
++        spread('rumor-hall-truce', 'Elder Bai and Gu Wen have made a truce; Jade Hall is whole again, though nobody trusts it.', 'npc-bai-qingshan', ['Jade Hall', 'The Crossroads'], 75),
++      ],
++    }),
++  ],
++};
++
++export const AUTUMN_ASSEMBLY_FINALE: FinaleSpec = {
++  outcomes: [
++    outcome({
++      id: 'volume-exposed',
++      headline: 'At the assembly, the player\'s question about the missing sword volume turns every eye to Gu Wen, who is exposed as the thief.',
++      description: 'Gu Wen goes white, then bolts for the gate; Elder Bai names him oathbreaker before the assembled disciples.',
++      when: [
++        { kind: 'player_at', locationId: 'Jade Hall' },
++        { kind: 'player_knows_rumor', rumorId: 'rumor-volume-missing' },
++        { kind: 'npc_disposition_at_least', npcId: 'npc-bai-qingshan', value: 3 },
++        { kind: 'npc_alive', npcId: 'npc-gu-wen' },
++      ],
++      effects: [
++        { kind: 'adjust_npc', npcId: 'npc-gu-wen', moveTo: 'Cloudstep Peak', disposition: -20 },
++        { kind: 'add_npc_goal', npcId: 'npc-gu-wen', retireOthers: true, goal: { id: 'goal-flee-hall', kind: 'protect', description: 'Stay out of reach of Jade Hall\'s discipline and keep the stolen volume', priority: 90 } },
++        { kind: 'adjust_npc', npcId: 'npc-bai-qingshan', disposition: 10 },
++        { kind: 'add_npc_goal', npcId: 'npc-bai-qingshan', goal: { id: 'goal-restore-order', kind: 'protect', description: 'Restore order after the exposure and decide Gu Wen\'s fate', priority: 95 } },
++        { kind: 'adjust_faction', factionId: 'faction-jade-hall', tension: -15, playerReputation: 10 },
++        spread('rumor-gu-wen-exposed', 'Gu Wen was exposed at the autumn assembly as the thief of Jade Hall\'s final sword volume, and has fled the Hall.', 'npc-bai-qingshan', ['Jade Hall', 'The Crossroads', 'Willow Market Town'], 85),
++        { kind: 'start_event', event: {
++          id: 'event-gu-wen-pursuit', kind: 'personal', title: 'The Hunt for Gu Wen',
++          description: 'Jade Hall disciples are combing the Azure Hills for Gu Wen and the stolen volume.',
++          locationId: 'Cloudstep Peak', factionIds: ['faction-jade-hall'], severity: 3, pace: { steps: 3, interval: 6 }, finale: GU_WEN_PURSUIT,
++        } },
++      ],
++    }),
++    outcome({
++      id: 'hall-schism',
++      headline: 'The assembly breaks apart: Gu Wen openly challenges Elder Bai\'s chosen heir, and half the disciples follow him out.',
++      description: 'Voices rise, benches scrape back, and a line of white-robed disciples walks out beneath the cypresses.',
++      when: [{ kind: 'faction_tension_at_least', factionId: 'faction-jade-hall', value: 45 }, { kind: 'npc_alive', npcId: 'npc-gu-wen' }],
++      effects: [
++        { kind: 'adjust_npc', npcId: 'npc-gu-wen', moveTo: 'Cloudstep Peak' },
++        { kind: 'add_npc_goal', npcId: 'npc-gu-wen', retireOthers: true, goal: { id: 'goal-rally-allies', kind: 'social', description: 'Gather allies for a rival claim to Jade Hall', priority: 90 } },
++        { kind: 'add_npc_goal', npcId: 'npc-bai-qingshan', goal: { id: 'goal-hold-hall', kind: 'protect', description: 'Keep Jade Hall from splitting further', priority: 95 } },
++        { kind: 'adjust_faction', factionId: 'faction-jade-hall', tension: 10, influence: -10, resources: -5 },
++        { kind: 'adjust_faction_relation', factionAId: 'faction-jade-hall', factionBId: 'faction-ninefold', trust: -5 },
++        spread('rumor-hall-schism', 'Jade Hall has split: Gu Wen and his followers walked out of the autumn assembly in open defiance of Elder Bai.', 'npc-gu-wen', ['Jade Hall', 'The Crossroads', 'Willow Market Town'], 85),
++        { kind: 'start_event', event: {
++          id: 'event-jade-hall-schism', kind: 'political', title: 'The Jade Hall Schism',
++          description: 'Jade Hall is divided between Elder Bai\'s loyalists and Gu Wen\'s followers; talk of a duel for the Hall\'s leadership is spreading.',
++          locationId: 'Jade Hall', factionIds: ['faction-jade-hall'], severity: 4, pace: { steps: 4, interval: 6 }, finale: HALL_SCHISM_FOLLOWUP,
++        } },
++      ],
++    }),
++    outcome({
++      id: 'heir-named',
++      headline: 'Elder Bai names his heir before the assembled disciples, and the Hall accepts the choice, for now.',
++      description: 'The old master lays his hand on the heir\'s shoulder; the courtyard is silent, then the disciples bow.',
++      when: [],
++      effects: [
++        { kind: 'adjust_faction', factionId: 'faction-jade-hall', tension: -15, influence: 5 },
++        { kind: 'add_npc_goal', npcId: 'npc-bai-qingshan', goal: { id: 'goal-train-heir', kind: 'train', description: 'Train his chosen heir before the next assembly', priority: 80 } },
++        spread('rumor-heir-named', 'Elder Bai has named his heir; the autumn assembly ended without bloodshed.', 'npc-bai-qingshan', ['Jade Hall', 'The Crossroads'], 90),
++      ],
++    }),
++  ],
++};
++
++// ---------------------------------------------------------------- Lantern Ferry
++
++const FERRY_BLOCKADE_FOLLOWUP: FinaleSpec = {
++  outcomes: [outcome({
++    id: 'blockade-lifted',
++    headline: 'Jade Hall pays the toll under protest and Captain Ma reopens the ferry; salt begins to flow again.',
++    description: 'Couriers cross in sullen silence while the ferrymen check every coin twice.',
++    when: [],
++    effects: [
++      { kind: 'adjust_faction_relation', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', hostility: -10 },
++      { kind: 'adjust_market', locationId: 'Lantern Ferry', scarcity: { salt: -15, fish: -10, rope: -10 } },
++      { kind: 'adjust_npc', npcId: 'npc-ma-tie', resources: 10 },
++      { kind: 'adjust_faction', factionId: 'faction-jade-hall', resources: -5 },
++      spread('rumor-blockade-lifted', 'Lantern Ferry is open again: Jade Hall paid the Black River\'s toll.', 'npc-ma-tie', ['Lantern Ferry', 'The Crossroads'], 80),
++    ],
++  })],
++};
++
++export const TOLL_DISPUTE_FINALE: FinaleSpec = {
++  outcomes: [
++    outcome({
++      id: 'toll-mediated',
++      headline: 'With the player\'s quiet mediation, Captain Ma and the Jade Hall couriers shake hands on a capped toll.',
++      description: 'The ferrymen lower their poles; the couriers pay once, and nobody loses face.',
++      when: [{ kind: 'player_at', locationId: 'Lantern Ferry' }, { kind: 'npc_disposition_at_least', npcId: 'npc-ma-tie', value: 3 }],
++      effects: [
++        { kind: 'adjust_faction_relation', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', hostility: -15, trust: 10, trade: 10 },
++        { kind: 'adjust_faction', factionId: 'faction-black-river', tension: -10, playerReputation: 8 },
++        { kind: 'adjust_faction', factionId: 'faction-jade-hall', playerReputation: 5 },
++        { kind: 'adjust_npc', npcId: 'npc-ma-tie', disposition: 8 },
++        spread('rumor-toll-capped', 'The Lantern Ferry toll has been capped after Captain Ma and the Jade Hall couriers shook hands on it.', 'npc-ma-tie', ['Lantern Ferry', 'The Crossroads'], 85),
++      ],
++    }),
++    outcome({
++      id: 'ferry-blockade',
++      headline: 'Captain Ma closes Lantern Ferry to Jade Hall couriers until the doubled toll is paid.',
++      description: 'Boats are hauled onto the bank and a line of ferrymen stands at the lantern pier, arms folded.',
++      when: [
++        { kind: 'faction_hostility_at_least', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', value: 30 },
++        { kind: 'faction_tension_at_least', factionId: 'faction-black-river', value: 30 },
++      ],
++      effects: [
++        { kind: 'adjust_market', locationId: 'Lantern Ferry', scarcity: { salt: 20, fish: 10, rope: 10 } },
++        { kind: 'adjust_faction_relation', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', hostility: 10, trust: -10, trade: -15 },
++        { kind: 'add_npc_goal', npcId: 'npc-ma-tie', goal: { id: 'goal-hold-ferry', kind: 'protect', description: 'Keep the ferry closed to Jade Hall couriers until the toll is paid', priority: 90 } },
++        spread('rumor-ferry-blockade', 'Captain Ma has closed Lantern Ferry to Jade Hall couriers, and salt is already getting dear.', 'npc-ma-tie', ['Lantern Ferry', 'The Crossroads', 'Willow Market Town'], 85),
++        { kind: 'start_event', event: {
++          id: 'event-ferry-blockade', kind: 'market', title: 'The Ferry Blockade',
++          description: 'The ferry is closed to Jade Hall couriers; goods are backing up at the pier and prices are rising.',
++          locationId: 'Lantern Ferry', factionIds: ['faction-black-river', 'faction-jade-hall'], severity: 3, pace: { steps: 3, interval: 5 }, finale: FERRY_BLOCKADE_FOLLOWUP,
++        } },
++      ],
++    }),
++    outcome({
++      id: 'toll-doubled',
++      headline: 'The Black River doubles the Lantern Ferry toll, and the Jade Hall couriers pay it with ill grace.',
++      description: 'A new tariff board goes up at the toll house; the couriers read it, spit, and pay.',
++      when: [],
++      effects: [
++        { kind: 'adjust_npc', npcId: 'npc-ma-tie', resources: 8 },
++        { kind: 'adjust_faction_relation', factionAId: 'faction-jade-hall', factionBId: 'faction-black-river', trust: -5, hostility: 5 },
++        { kind: 'adjust_market', locationId: 'Lantern Ferry', scarcity: { salt: 6 } },
++        spread('rumor-toll-doubled', 'The Black River has doubled the Lantern Ferry toll, and Jade Hall is paying it.', 'npc-ma-tie', ['Lantern Ferry', 'The Crossroads'], 80),
++      ],
++    }),
++  ],
++};
++
++// ---------------------------------------------------------------- Willow Market
++
++const MEDICINE_SHORTAGE_FOLLOWUP: FinaleSpec = {
++  outcomes: [outcome({
++    id: 'shortage-eased',
++    headline: 'Marsh herbs finally reach Willow Market and the price of medicine falls back.',
++    description: 'Crates of reed-wrapped herbs are carried into the stalls, and the line outside the infirmary shortens.',
++    when: [],
++    effects: [
++      { kind: 'adjust_market', locationId: 'Willow Market Town', scarcity: { medicine: -14, herbs: -12 } },
++      { kind: 'adjust_npc', npcId: 'npc-yun-shuang', disposition: 3, resources: 5 },
++      spread('rumor-shortage-eased', 'Marsh herbs have reached Willow Market; medicine is affordable again.', 'npc-yun-shuang', ['Willow Market Town', 'The Crossroads'], 80),
++    ],
++  })],
++};
++
++export const FEVER_SEASON_FINALE: FinaleSpec = {
++  outcomes: [
++    outcome({
++      id: 'healer-rallied',
++      headline: 'With the player\'s help, Madam Yun Shuang\'s infirmary turns the tide of the fever.',
++      description: 'Beds are cleared, broths are brewed in rows, and by evening the coughing in the market has thinned.',
++      when: [{ kind: 'player_at', locationId: 'Willow Market Town' }, { kind: 'npc_disposition_at_least', npcId: 'npc-yun-shuang', value: 3 }],
++      effects: [
++        { kind: 'adjust_market', locationId: 'Willow Market Town', scarcity: { medicine: -10, herbs: -8 } },
++        { kind: 'adjust_npc', npcId: 'npc-yun-shuang', disposition: 8 },
++        { kind: 'adjust_faction', factionId: 'faction-willow-guild', playerReputation: 8, tension: -5 },
++        spread('rumor-fever-turned', 'The fever in Willow Market broke after Madam Yun Shuang and a travelling helper rallied the infirmary.', 'npc-yun-shuang', ['Willow Market Town', 'The Crossroads'], 85),
++      ],
++    }),
++    outcome({
++      id: 'fever-epidemic',
++      headline: 'The fever peaks and Willow Market\'s medicine runs short; the infirmary begins turning people away.',
++      description: 'A queue winds around the infirmary wall, and herb sellers have chalked new, steeper prices on their boards.',
++      when: [{ kind: 'market_scarcity_at_least', locationId: 'Willow Market Town', good: 'medicine', value: 36 }],
++      effects: [
++        { kind: 'adjust_market', locationId: 'Willow Market Town', scarcity: { medicine: 12, herbs: 10 } },
++        { kind: 'add_npc_goal', npcId: 'npc-yun-shuang', goal: { id: 'goal-source-herbs', kind: 'trade', description: 'Find marsh herbs at any price before the infirmary runs dry', priority: 95 } },
++        { kind: 'adjust_npc', npcId: 'npc-yun-shuang', resources: -10 },
++        { kind: 'adjust_faction', factionId: 'faction-willow-guild', tension: 8 },
++        spread('rumor-medicine-shortage', 'Medicine has run short in Willow Market, and the infirmary is turning people away.', 'npc-yun-shuang', ['Willow Market Town', 'The Crossroads', 'Lantern Ferry'], 85),
++        { kind: 'start_event', event: {
++          id: 'event-medicine-shortage', kind: 'market', title: 'The Medicine Shortage',
++          description: 'Medicine and herbs are scarce in Willow Market; the infirmary is rationing and prices are climbing.',
++          locationId: 'Willow Market Town', factionIds: ['faction-willow-guild'], severity: 3, pace: { steps: 3, interval: 5 }, finale: MEDICINE_SHORTAGE_FOLLOWUP,
++        } },
++      ],
++    }),
++    outcome({
++      id: 'fever-passes',
++      headline: 'The fever fades with the first cool nights, and the market breathes again.',
++      description: 'Shutters reopen along the lane and the infirmary\'s doors stand propped open to the evening air.',
++      when: [],
++      effects: [
++        { kind: 'adjust_market', locationId: 'Willow Market Town', scarcity: { medicine: -6, herbs: -4 } },
++        { kind: 'adjust_faction', factionId: 'faction-willow-guild', tension: -5 },
++        spread('rumor-fever-passed', 'The river fever has passed in Willow Market.', 'npc-yun-shuang', ['Willow Market Town', 'The Crossroads'], 80),
++      ],
++    }),
++  ],
++};
++
++export const FINALES: Record<string, FinaleSpec> = {
++  'event-toll-dispute': TOLL_DISPUTE_FINALE,
++  'event-fever-season': FEVER_SEASON_FINALE,
++  'event-autumn-assembly': AUTUMN_ASSEMBLY_FINALE,
++};
+diff --git a/src/world/content/index.ts b/src/world/content/index.ts
+index ecdf0e7..b797e2b 100644
+--- a/src/world/content/index.ts
++++ b/src/world/content/index.ts
+@@ -6,6 +6,7 @@ import { instantiateArt } from './martialArts';
+ import { ORIGINS, originsFor } from './origins';
+ 
+ export * from './fantasyLayer';
++export * from './finales';
+ export * from './jianghuSeed';
+ export * from './locations';
+ export * from './martialArts';
+@@ -23,6 +24,8 @@ export function createWuxiaSimulation(
+   originId: string,
+   fantasy: FantasyLayerConfig = FANTASY_PRESETS[DEFAULT_FANTASY_PRESET],
+   characterName = 'Wanderer',
++  /** Seed for replayable rolls. Fixed by default so content tests are deterministic; the store passes a random one. */
++  seed = 1,
+ ): SimulationState {
+   const origin = originsFor(supernaturalEnabled(fantasy)).find(o => o.id === originId);
+   if (!origin) {
+@@ -53,6 +56,7 @@ export function createWuxiaSimulation(
+       knownFacts: [],
+       knownRumorIds: [],
+       knownNpcIds: [],
++      rng: { seed: seed >>> 0, draws: 0 },
+     },
+     jianghu: createWuxiaJianghu({ fantasy }),
+     ledger: [],
+diff --git a/src/world/content/jianghuSeed.ts b/src/world/content/jianghuSeed.ts
+index 9acf98f..110df75 100644
+--- a/src/world/content/jianghuSeed.ts
++++ b/src/world/content/jianghuSeed.ts
+@@ -4,6 +4,7 @@ import type {
+ } from '../../engine/jianghu';
+ import { DEFAULT_FANTASY_PRESET, FANTASY_PRESETS, supernaturalEnabled, type FantasyLayerConfig } from './fantasyLayer';
+ import { locationsFor } from './locations';
++import { FINALES } from './finales';
+ 
+ /** Presentation/dialogue data kept beside (never inside) the authoritative NPCState. */
+ export interface NpcProfile {
+@@ -178,13 +179,13 @@ export const RUMORS: Array<Omit<RumorState, 'createdTurn'> & { fantasy?: boolean
+ export const WORLD_EVENTS: WorldEventState[] = [
+   { id: 'event-toll-dispute', kind: 'conflict', title: 'The Ferry Toll Dispute',
+     description: 'Jade Hall couriers and the Black River argue over the Lantern Ferry toll; tempers are rising.',
+-    locationId: 'Lantern Ferry', factionIds: ['faction-jade-hall', 'faction-black-river'], severity: 2, active: true, createdTurn: 0, pace: { steps: 5, interval: 4 } },
++    locationId: 'Lantern Ferry', factionIds: ['faction-jade-hall', 'faction-black-river'], severity: 2, active: true, createdTurn: 0, pace: { steps: 5, interval: 4 }, finale: FINALES['event-toll-dispute'] },
+   { id: 'event-fever-season', kind: 'natural', title: 'Fever Season in Willow Market',
+     description: 'A river fever is spreading through the market town; medicine prices are climbing.',
+-    locationId: 'Willow Market Town', factionIds: ['faction-willow-guild'], severity: 2, active: true, createdTurn: 0, expiresTurn: 30, pace: { steps: 4, interval: 6 } },
++    locationId: 'Willow Market Town', factionIds: ['faction-willow-guild'], severity: 2, active: true, createdTurn: 0, expiresTurn: 30, pace: { steps: 4, interval: 6 }, finale: FINALES['event-fever-season'] },
+   { id: 'event-autumn-assembly', kind: 'political', title: 'The Autumn Assembly Approaches',
+     description: 'Jade Hall must name an heir before the autumn assembly; rival disciples are positioning themselves.',
+-    locationId: 'Jade Hall', factionIds: ['faction-jade-hall'], severity: 3, active: true, createdTurn: 0, expiresTurn: 60, pace: { steps: 6, interval: 8 } },
++    locationId: 'Jade Hall', factionIds: ['faction-jade-hall'], severity: 3, active: true, createdTurn: 0, expiresTurn: 60, pace: { steps: 6, interval: 8 }, finale: FINALES['event-autumn-assembly'] },
+ ];
+ 
+ /** Stock 20 is "no scarcity" in the v3 price model; lower stock raises scarcity and price. */
+diff --git a/src/world/content/opening.ts b/src/world/content/opening.ts
+index 9e8bff1..1aa73be 100644
+--- a/src/world/content/opening.ts
++++ b/src/world/content/opening.ts
+@@ -1,5 +1,5 @@
+ import type { Character, GameChoice, InventoryItem } from '../../types/game';
+-import { LOCATIONS } from './locations';
++import { LOCATIONS, TRAVEL_EDGES } from './locations';
+ import { NPC_PROFILES } from './jianghuSeed';
+ import { ORIGINS, type OriginProfile } from './origins';
+ 
+@@ -91,3 +91,13 @@ export function buildDigestOptions(): { npcVoices: Record<string, string>; locat
+     ])),
+   };
+ }
++
++/** Neighbours and features for the deterministic choice generator, from the authored map. */
++export function buildChoiceContext() {
++  return {
++    neighbours: (locationId: string) => TRAVEL_EDGES
++      .filter(e => e.a === locationId || e.b === locationId)
++      .map(e => ({ id: e.a === locationId ? e.b : e.a, days: e.days })),
++    features: (locationId: string) => LOCATIONS.find(l => l.id === locationId)?.features ?? [],
++  };
++}
+diff --git a/test/simulation/ai-fallback.test.ts b/test/simulation/ai-fallback.test.ts
+new file mode 100644
+index 0000000..1e22971
+--- /dev/null
++++ b/test/simulation/ai-fallback.test.ts
+@@ -0,0 +1,116 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { choiceCandidates, generateChoices, isHonourable, mergeChoices } from '../../src/ai/choiceGenerator';
++import { fallbackNarration } from '../../src/ai/fallbackNarrator';
++import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
++import { resolveAction } from '../../src/engine/resolveAction';
++import { validateProposedAction } from '../../src/engine/actionContract';
++import { validateState } from '../../src/engine/validateState';
++import {
++  FANTASY_PRESETS, NPC_PROFILES, ORIGINS, buildChoiceContext, buildDigestOptions, createWuxiaSimulation,
++} from '../../src/world/content';
++
++const ctx = buildChoiceContext();
++const options = buildDigestOptions();
++
++test('generated choices are five, distinct, legal, and each does what its text says', () => {
++  for (const origin of ORIGINS) {
++    let state = createWuxiaSimulation(origin.id);
++    for (let t = 0; t < 12; t++) {
++      const candidates = choiceCandidates(state, ctx);
++      const choices = generateChoices(state, ctx);
++      assert.equal(choices.length, 5, `${origin.id} t${t}`);
++      assert.equal(new Set(choices.map(c => c.text.toLowerCase())).size, 5);
++      assert.deepStrictEqual(choices.map(c => c.id), [1, 2, 3, 4, 5]);
++      candidates.slice(0, 5).forEach(c => {
++        const action = interpretPlayerAction(c.text, state, c.risk);
++        assert.equal(action.kind, c.intendedKind, `"${c.text}" read as ${action.kind}`);
++        assert.deepStrictEqual(validateProposedAction(state, action), [], c.text);
++        if (c.intendedKind === 'travel') assert.ok(action.destinationId && action.destinationId !== state.character.locationId, c.text);
++        if (c.intendedKind === 'talk') assert.ok(action.targetId, c.text);
++      });
++      // Follow the first suggestion each turn; the world must stay valid.
++      const next = interpretPlayerAction(choices[t % 5].text, state, choices[t % 5].risk);
++      state = resolveAction(state, next, 60).state;
++      assert.deepStrictEqual(validateState(state), []);
++    }
++  }
++});
++
++test('generated choices respect the fantasy setting: nothing supernatural when it is off', () => {
++  const state = createWuxiaSimulation('origin-wandering-physician', FANTASY_PRESETS.pure_wuxia);
++  for (let t = 0; t < 8; t++) {
++    const texts = choiceCandidates(state, ctx).map(c => c.text).join('|');
++    for (const banned of ['Moonwell Grove', 'Sunken Archive', 'Su Mian', 'Archivist Mo']) assert.ok(!texts.includes(banned), banned);
++    state.world.turn = t;
++  }
++});
++
++test('an approaching local finale is offered as a way to be present for it', () => {
++  let state = createWuxiaSimulation('origin-escort-apprentice');
++  let offered = false;
++  for (let t = 1; t <= 20; t++) {
++    state = resolveAction(state, interpretPlayerAction('Rest', state, 'low'), 60).state;
++    if (generateChoices(state, ctx).some(c => c.text.startsWith('Watch and listen closely'))) offered = true;
++  }
++  assert.ok(offered);
++  assert.ok(!generateChoices(createWuxiaSimulation('origin-frontier-deserter'), ctx).some(c => c.text.startsWith('Watch and listen')));
++});
++
++test('narrator suggestions the rules cannot honour are replaced; honourable ones are kept in order', () => {
++  const state = createWuxiaSimulation('origin-disgraced-disciple');
++  const proposed = [
++    { id: 1, text: 'Travel to the Hidden Dragon Temple', risk: 'high' as const },
++    { id: 2, text: 'Talk to the Old Tea Keeper', risk: 'low' as const },
++    { id: 3, text: 'Travel to The Crossroads', risk: 'low' as const },
++    { id: 4, text: 'Travel to Lantern Ferry', risk: 'medium' as const },
++    { id: 5, text: 'Rest', risk: 'low' as const },
++  ];
++  assert.equal(isHonourable('Travel to the Hidden Dragon Temple', 'high', state), false);
++  assert.equal(isHonourable('Travel to The Crossroads', 'low', state), false);
++  const merged = mergeChoices(proposed, state, ctx);
++  assert.equal(merged.length, 5);
++  assert.deepStrictEqual(merged.map(c => c.id), [1, 2, 3, 4, 5]);
++  assert.deepStrictEqual(merged.slice(0, 3).map(c => c.text), ['Talk to the Old Tea Keeper', 'Travel to Lantern Ferry', 'Rest']);
++  assert.ok(merged.every(c => isHonourable(c.text, c.risk, state)));
++  assert.equal(mergeChoices([], state, ctx).length, 5);
++});
++
++test('the fallback narrator describes every origin x opening choice x roll from the result alone, without leaks', () => {
++  const secrets = NPC_PROFILES.flatMap(p => [...p.npc.secrets, ...p.npc.goals.map(g => g.description)]);
++  for (const origin of ORIGINS) for (const choice of origin.openingChoices) for (const roll of [5, 50, 95]) {
++    const sim = createWuxiaSimulation(origin.id);
++    const result = resolveAction(sim, interpretPlayerAction(choice.intent, sim, choice.risk), roll);
++    const text = fallbackNarration(result, options);
++    assert.ok(text.length > 20 && text.length < 1500);
++    assert.equal(text, fallbackNarration(result, options), 'deterministic');
++    for (const secret of secrets) assert.ok(!text.includes(secret), `${origin.id}/${choice.label}@${roll} leaked: ${secret}`);
++  }
++});
++
++test('the fallback narrator reports what the player perceived: hearsay, travel and a witnessed finale', () => {
++  const sim = createWuxiaSimulation('origin-disgraced-disciple');
++  const talk = fallbackNarration(resolveAction(sim, interpretPlayerAction('Talk to Old Tea Keeper', sim, 'low'), 60), options);
++  assert.ok(talk.includes('Old Tea Keeper tells you what is being said'));
++  assert.ok(talk.includes('cannot yet tell how much of it is true'));
++  const trip = fallbackNarration(resolveAction(sim, interpretPlayerAction('Travel to Lantern Ferry', sim, 'low'), 60), options);
++  assert.ok(trip.includes('You arrive at Lantern Ferry.'));
++  const failed = fallbackNarration(resolveAction(sim, interpretPlayerAction('Talk to Old Tea Keeper', sim, 'low'), 5), options);
++  assert.ok(!failed.includes('tells you what is being said'));
++
++  let state = createWuxiaSimulation('origin-escort-apprentice'); let finaleText = '';
++  for (let t = 1; t <= 30 && !finaleText; t++) {
++    const r = resolveAction(state, interpretPlayerAction(t <= 3 || t >= 16 ? 'Talk to Captain Ma Tie' : 'Rest', state, 'low'), 60);
++    state = r.state;
++    if (r.events.some(e => e.type === 'world.finale_resolved')) finaleText = fallbackNarration(r, options);
++  }
++  assert.ok(finaleText.includes('capped toll'));
++});
++
++test('the fallback never mutates the resolution it describes', () => {
++  const sim = createWuxiaSimulation('origin-disgraced-disciple');
++  const result = resolveAction(sim, interpretPlayerAction('Talk to Old Tea Keeper', sim, 'low'), 60);
++  const before = JSON.stringify(result);
++  fallbackNarration(result, options); generateChoices(result.state, ctx);
++  assert.equal(JSON.stringify(result), before);
++});
+diff --git a/test/simulation/finale.test.ts b/test/simulation/finale.test.ts
+new file mode 100644
+index 0000000..78330ff
+--- /dev/null
++++ b/test/simulation/finale.test.ts
+@@ -0,0 +1,167 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
++import { applyFinale, conditionHolds, selectFinaleOutcome, validateFinaleSpec, type FinaleSpec } from '../../src/engine/finale';
++import { advanceCausalChains } from '../../src/engine/jianghuInformationV4';
++import { buildNarratorDigest } from '../../src/engine/narratorDigest';
++import { resolveAction } from '../../src/engine/resolveAction';
++import type { SimulationState } from '../../src/engine/types';
++import { validateState } from '../../src/engine/validateState';
++import {
++  FINALES, NPC_PROFILES, buildDigestOptions, createWuxiaJianghu, createWuxiaSimulation, wuxiaLocationIds,
++} from '../../src/world/content';
++
++const options = buildDigestOptions();
++const fresh = (origin = 'origin-disgraced-disciple') => createWuxiaSimulation(origin);
++
++/** Collect every finale (including nested follow-ups) as [eventId, spec]. */
++function allFinales(): Array<[string, FinaleSpec]> {
++  const out: Array<[string, FinaleSpec]> = [];
++  const visit = (id: string, spec: FinaleSpec) => {
++    out.push([id, spec]);
++    for (const o of spec.outcomes) for (const e of o.effects) if (e.kind === 'start_event' && e.event.finale) visit(e.event.id, e.event.finale);
++  };
++  for (const [id, spec] of Object.entries(FINALES)) visit(id, spec);
++  return out;
++}
++
++test('every authored finale is structurally valid and every reference resolves', () => {
++  const j = createWuxiaJianghu();
++  const locations = wuxiaLocationIds();
++  for (const [id, spec] of allFinales()) assert.deepStrictEqual(validateFinaleSpec(spec, j, locations), [], id);
++  assert.ok(allFinales().length >= 7);
++});
++
++test('forcing every outcome of every finale applies all of its effects (nothing silently skipped)', () => {
++  for (const [id, spec] of allFinales()) {
++    for (const outcome of spec.outcomes) {
++      const sim = fresh();
++      const j = sim.jianghu!;
++      const event = { id, kind: 'political' as const, title: 't', description: 'd', factionIds: [], severity: 2, active: true, createdTurn: 0, locationId: 'Jade Hall', finale: { outcomes: [{ ...outcome, when: [] }] } };
++      j.worldEvents.push(event);
++      const result = applyFinale(j, sim, event);
++      assert.equal(result.event?.payload.effectsSkipped, 0, `${id}/${outcome.id}`);
++      assert.equal(event.active, false);
++    }
++  }
++});
++
++test('finale outcome selection is deterministic: first match wins, the unconditional last outcome is the default', () => {
++  const sim = fresh(); const j = sim.jianghu!;
++  const spec = FINALES['event-autumn-assembly'];
++  j.factions.find(f => f.id === 'faction-jade-hall')!.internalTension = 10;
++  assert.equal(selectFinaleOutcome(spec, j, sim)?.id, 'heir-named');
++  j.factions.find(f => f.id === 'faction-jade-hall')!.internalTension = 60;
++  assert.equal(selectFinaleOutcome(spec, j, sim)?.id, 'hall-schism');
++  assert.equal(selectFinaleOutcome(spec, j, sim)?.id, selectFinaleOutcome(spec, j, sim)?.id);
++});
++
++test('conditions treat unknown ids as false rather than throwing', () => {
++  const sim = fresh();
++  for (const c of [
++    { kind: 'npc_alive', npcId: 'nobody' }, { kind: 'faction_tension_at_least', factionId: 'nobody', value: 0 },
++    { kind: 'market_scarcity_at_least', locationId: 'nowhere', good: 'x', value: 0 }, { kind: 'faction_hostility_at_least', factionAId: 'a', factionBId: 'b', value: 0 },
++    { kind: 'npc_disposition_at_least', npcId: 'nobody', value: -100 },
++  ] as const) assert.equal(conditionHolds(c, sim.jianghu!, sim), false);
++});
++
++test('passive play unfolds as a cascade: blockade, epidemic, schism, and each follow-up resolves', () => {
++  let state = fresh();
++  const outcomes: Record<string, { turn: number; outcome: string }> = {};
++  for (let t = 1; t <= 90; t++) {
++    const r = resolveAction(state, interpretPlayerAction(t % 3 ? 'Rest' : 'Meditate quietly', state, 'low'), 60);
++    state = r.state;
++    assert.deepStrictEqual(validateState(state), [], `turn ${t}`);
++    for (const e of r.events) if (e.type === 'world.finale_resolved') outcomes[String(e.payload.eventId)] = { turn: t, outcome: String(e.payload.outcomeId) };
++  }
++  assert.equal(outcomes['event-toll-dispute']?.outcome, 'ferry-blockade');
++  assert.equal(outcomes['event-fever-season']?.outcome, 'fever-epidemic');
++  assert.equal(outcomes['event-autumn-assembly']?.outcome, 'hall-schism');
++  for (const follow of ['event-ferry-blockade', 'event-medicine-shortage', 'event-jade-hall-schism']) assert.ok(outcomes[follow], `${follow} should resolve`);
++  assert.ok(outcomes['event-ferry-blockade'].turn > outcomes['event-toll-dispute'].turn);
++  assert.equal(state.jianghu!.worldEvents.filter(e => e.active).length, 0);
++});
++
++test('a finale fires exactly once and ends its event', () => {
++  let state = fresh(); let fired = 0;
++  for (let t = 1; t <= 60; t++) {
++    const r = resolveAction(state, interpretPlayerAction('Rest', state, 'low'), 60); state = r.state;
++    fired += r.events.filter(e => e.type === 'world.finale_resolved' && e.payload.eventId === 'event-toll-dispute').length;
++  }
++  assert.equal(fired, 1);
++  assert.ok(!state.jianghu!.worldEvents.some(e => e.id === 'event-toll-dispute'));
++});
++
++test('a player who earned trust and is present changes the outcome, and witnesses it', () => {
++  // Real play: start at the ferry and keep talking to Captain Ma. The dispute sours local moods as it
++  // builds (goodwill decays over the middle stages), so trust has to be maintained, not just earned once.
++  let state = createWuxiaSimulation('origin-escort-apprentice');
++  let finale: Record<string, string | number | boolean | null> | undefined; let digest = '';
++  for (let t = 1; t <= 30 && !finale; t++) {
++    const text = t <= 3 || t >= 16 ? 'Talk to Captain Ma Tie' : 'Rest';
++    const r = resolveAction(state, interpretPlayerAction(text, state, 'low'), 60); state = r.state;
++    const e = r.events.find(ev => ev.type === 'world.finale_resolved' && ev.payload.eventId === 'event-toll-dispute');
++    if (e) { finale = e.payload; digest = buildNarratorDigest(r, options); }
++  }
++  assert.ok(finale, 'toll finale should fire');
++  assert.equal(finale!.outcomeId, 'toll-mediated');
++  assert.equal(finale!.witnessedByPlayer, true);
++  assert.ok(digest.includes('A decisive moment unfolded before you'));
++  assert.ok(digest.includes('capped toll'));
++  const record = state.jianghu!.knowledgeRecords!.find(k => k.sourceId === 'event-toll-dispute');
++  assert.equal(record?.sourceKind, 'observation');
++  assert.ok(state.world.knownRumorIds!.includes('rumor-toll-capped-lantern-ferry'));
++  assert.deepStrictEqual(validateState(state), []);
++});
++
++test('an absent player is not told: no witness, no digest line, and the news only exists as rumor', () => {
++  let state = fresh(); // starts at The Crossroads, never travels
++  let digestLines = '';
++  for (let t = 1; t <= 25; t++) {
++    const r = resolveAction(state, interpretPlayerAction('Rest', state, 'low'), 60); state = r.state;
++    const e = r.events.find(ev => ev.type === 'world.finale_resolved');
++    if (e) { assert.equal(e.payload.witnessedByPlayer, false); assert.deepStrictEqual(e.witnesses, []); digestLines += buildNarratorDigest(r, options); }
++  }
++  assert.ok(!digestLines.includes('A decisive moment'));
++  assert.ok(!state.jianghu!.knowledgeRecords!.some(k => k.sourceKind === 'observation'));
++  const blockade = state.jianghu!.rumors.find(r => r.id === 'rumor-ferry-blockade-the-crossroads');
++  assert.ok(blockade, 'news should reach the crossroads');
++  assert.ok(blockade.knownBy.includes('npc-teahouse-keeper'), 'the tea keeper has heard');
++  assert.ok(!blockade.knownBy.includes('player'));
++});
++
++test('foreshadowing: a local event with a finale says it is nearing, fuzzily and without leaking numbers or secrets', () => {
++  let state = createWuxiaSimulation('origin-escort-apprentice');
++  let sawSoon = false;
++  for (let t = 1; t <= 20; t++) {
++    const r = resolveAction(state, interpretPlayerAction('Rest', state, 'low'), 60); state = r.state;
++    const d = buildNarratorDigest(r, options);
++    if (d.includes('come to a head')) {
++      sawSoon = true;
++      assert.ok(!/\d+ turns?/.test(d));
++      for (const p of NPC_PROFILES) for (const secret of p.npc.secrets) assert.ok(!d.includes(secret));
++    }
++  }
++  assert.ok(sawSoon);
++});
++
++test('a finale cannot recreate an event that already exists (cascades are bounded by unique ids)', () => {
++  const sim = fresh(); const j = sim.jianghu!;
++  const spec: FinaleSpec = { outcomes: [{ id: 'o', headline: 'h', description: 'd', when: [], effects: [
++    { kind: 'start_event', event: { id: 'event-toll-dispute', kind: 'conflict', title: 'dup', description: 'dup', factionIds: [], severity: 1 } }] }] };
++  const event = { id: 'event-x', kind: 'conflict' as const, title: 'x', description: 'x', factionIds: [], severity: 1, active: true, createdTurn: 0, finale: spec };
++  j.worldEvents.push(event);
++  const before = j.worldEvents.length;
++  const result = applyFinale(j, sim, event);
++  assert.equal(result.event?.payload.effectsSkipped, 1);
++  assert.equal(j.worldEvents.length, before);
++});
++
++test('events without a finale keep the old behaviour: chain completes, event stays active', () => {
++  const sim = fresh(); const j = sim.jianghu!;
++  j.worldEvents = [{ id: 'plain', kind: 'conflict', title: 'p', description: 'p', factionIds: [], severity: 1, active: true, createdTurn: 0, locationId: 'The Crossroads' }];
++  let cur = j;
++  for (let t = 1; t <= 6; t++) { sim.world.turn = t; cur = advanceCausalChains(cur, sim).jianghu; }
++  assert.equal(cur.worldEvents[0].active, true);
++  assert.equal(cur.causalChains!.find(c => c.rootEventId === 'plain')!.active, false);
++});
+diff --git a/test/simulation/rng-replay.test.ts b/test/simulation/rng-replay.test.ts
+new file mode 100644
+index 0000000..68c2f9e
+--- /dev/null
++++ b/test/simulation/rng-replay.test.ts
+@@ -0,0 +1,94 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { resolvePlayerAction } from '../../src/engine/actionPipeline';
++import { peekRoll, rollAt } from '../../src/engine/rng';
++import { validateState } from '../../src/engine/validateState';
++import type { GameState } from '../../src/types/game';
++import { FANTASY_PRESETS, createOriginCharacter, createWuxiaSimulation, findOrigin } from '../../src/world/content';
++
++/** A GameState exactly as the store builds it for an origin character. */
++function newGame(originId = 'origin-disgraced-disciple', seed = 7): GameState {
++  const origin = findOrigin(originId)!;
++  const simulation = createWuxiaSimulation(originId, FANTASY_PRESETS.living_legends, 'Tester', seed);
++  return {
++    character: createOriginCharacter(origin, 'Tester', 'c1', 'living_legends'), turns: [], currentScene: '',
++    location: simulation.character.locationId, questLog: [], relationships: [], isGameStarted: true, isGameOver: false, turnCount: 0, simulation,
++  };
++}
++const SCRIPT = ['Talk to Old Tea Keeper', 'Rest', 'Travel to Lantern Ferry', 'Talk to Captain Ma Tie', 'Meditate quietly', 'Inspect the toll house', 'Travel to The Crossroads', 'Rest'];
++function play(game: GameState, turns: number) {
++  const rolls: number[] = [];
++  for (let i = 0; i < turns; i++) {
++    const prepared = resolvePlayerAction(game, SCRIPT[i % SCRIPT.length], 'medium');
++    rolls.push(prepared.resolution.roll);
++    game = prepared.nextGameState;
++    assert.deepStrictEqual(validateState(game.simulation!), [], `turn ${i}`);
++  }
++  return { game, rolls };
++}
++
++test('rollAt is a pure function of (seed, draw) with a usable spread over 0..99', () => {
++  assert.equal(rollAt(42, 5), rollAt(42, 5));
++  assert.notEqual(rollAt(42, 5) + rollAt(42, 6) + rollAt(42, 7), rollAt(43, 5) + rollAt(43, 6) + rollAt(43, 7));
++  const counts = new Array(10).fill(0);
++  for (let d = 0; d < 20000; d++) { const r = rollAt(12345, d); assert.ok(Number.isInteger(r) && r >= 0 && r <= 99); counts[Math.floor(r / 10)]++; }
++  for (const c of counts) assert.ok(c > 1700 && c < 2300, `decile count ${c}`);
++});
++
++test('the same seed and the same actions replay to a byte-identical game, rolls included', () => {
++  const a = play(newGame('origin-disgraced-disciple', 99), 40);
++  const b = play(newGame('origin-disgraced-disciple', 99), 40);
++  assert.deepStrictEqual(a.rolls, b.rolls);
++  assert.equal(JSON.stringify(a.game.simulation), JSON.stringify(b.game.simulation));
++  const other = play(newGame('origin-disgraced-disciple', 100), 40);
++  assert.notDeepStrictEqual(a.rolls, other.rolls);
++});
++
++test('each resolved action consumes exactly one draw, and the roll used is the one that was peeked', () => {
++  let game = newGame();
++  for (let i = 0; i < 6; i++) {
++    const expected = peekRoll(game.simulation!);
++    assert.equal(game.simulation!.world.rng!.draws, i);
++    const prepared = resolvePlayerAction(game, 'Rest', 'low');
++    assert.equal(prepared.resolution.roll, expected);
++    game = prepared.nextGameState;
++  }
++  assert.equal(game.simulation!.world.rng!.draws, 6);
++});
++
++test('an injected roll is honoured and does not disturb the saved sequence', () => {
++  const game = newGame();
++  const injected = resolvePlayerAction(game, 'Rest', 'low', 77);
++  assert.equal(injected.resolution.roll, 77);
++  assert.deepStrictEqual(injected.nextGameState.simulation!.world.rng, game.simulation!.world.rng);
++});
++
++test('a save from before seeded rolls gets a seed on its first action and is replayable from then on', () => {
++  const legacy = newGame(); delete legacy.simulation!.world.rng;
++  const first = resolvePlayerAction(legacy, 'Rest', 'low');
++  const rng = first.nextGameState.simulation!.world.rng!;
++  assert.equal(rng.draws, 1);
++  assert.ok(Number.isInteger(rng.seed));
++  const second = resolvePlayerAction(first.nextGameState, 'Rest', 'low');
++  assert.equal(second.resolution.roll, rollAt(rng.seed, 1));
++});
++
++test('corrupt rng values are rejected at the boundary', () => {
++  for (const bad of [{ seed: -1, draws: 0 }, { seed: 1.5, draws: 0 }, { seed: 1, draws: -3 }, { seed: 2 ** 40, draws: 0 }]) {
++    const game = newGame(); game.simulation!.world.rng = bad;
++    assert.throws(() => resolvePlayerAction(game, 'Rest', 'low'), /rng/);
++  }
++});
++
++test('the live pipeline (store path) can actually travel between authored locations', () => {
++  let game = newGame('origin-disgraced-disciple');
++  assert.equal(game.location, 'The Crossroads');
++  // Re-roll the seed until the travel roll succeeds so the test is about wiring, not luck.
++  for (let seed = 1; seed < 50; seed++) {
++    game = newGame('origin-disgraced-disciple', seed);
++    const prepared = resolvePlayerAction(game, 'Travel to Lantern Ferry', 'low');
++    if (prepared.resolution.status === 'success') { game = prepared.nextGameState; break; }
++  }
++  assert.equal(game.location, 'Lantern Ferry');
++  assert.equal(game.simulation!.character.locationId, 'Lantern Ferry');
++});

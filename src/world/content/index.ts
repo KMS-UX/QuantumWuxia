@@ -6,6 +6,7 @@ import { instantiateArt } from './martialArts';
 import { ORIGINS, originsFor } from './origins';
 
 export * from './fantasyLayer';
+export * from './finales';
 export * from './jianghuSeed';
 export * from './locations';
 export * from './martialArts';
@@ -23,6 +24,8 @@ export function createWuxiaSimulation(
   originId: string,
   fantasy: FantasyLayerConfig = FANTASY_PRESETS[DEFAULT_FANTASY_PRESET],
   characterName = 'Wanderer',
+  /** Seed for replayable rolls. Fixed by default so content tests are deterministic; the store passes a random one. */
+  seed = 1,
 ): SimulationState {
   const origin = originsFor(supernaturalEnabled(fantasy)).find(o => o.id === originId);
   if (!origin) {
@@ -53,6 +56,7 @@ export function createWuxiaSimulation(
       knownFacts: [],
       knownRumorIds: [],
       knownNpcIds: [],
+      rng: { seed: seed >>> 0, draws: 0 },
     },
     jianghu: createWuxiaJianghu({ fantasy }),
     ledger: [],

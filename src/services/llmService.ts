@@ -264,6 +264,7 @@ async function narrate(config: LLMConfig, messages: Array<{ role: string; conten
     console.warn('Narrator output unusable, retrying once:', validation.issues);
     validation = parseNarration(await callProvider(config, messages));
   }
+  if (validation.narrativeIsFallback) throw new Error('The narrator returned no usable text.');
   if (validation.issues.length) console.warn('Narrator output repaired:', validation.issues);
   return validation.result;
 }
