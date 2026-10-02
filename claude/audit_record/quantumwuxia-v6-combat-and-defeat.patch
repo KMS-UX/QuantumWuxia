@@ -1,0 +1,1105 @@
+diff --git a/doc/AUDIT_2026-10-01.md b/doc/AUDIT_2026-10-01.md
+index 9c0cb19..5a7fb5e 100644
+--- a/doc/AUDIT_2026-10-01.md
++++ b/doc/AUDIT_2026-10-01.md
+@@ -166,7 +166,7 @@ Present: Character, Jianghu/World events, NPC, Faction, Relationship, Knowledge,
+ ### §6-7 Character, martial model, injury
+ - Attributes, Qi and cultivation are modelled; martial-art data is complete in content but unused by rules (pillar 4).
+ - Injuries have body regions, but the only source is one backlash on a high-risk failure and no injury changes any mechanic (a broken arm affects nothing).
+-- **HP never decreases in the engine, so defeat cannot occur there.** Legacy `Combat.tsx` can reduce HP, and the store then shows an end screen; `revive()` restores half HP automatically, which §7 explicitly says not to use as the default. Defeat-as-new-situation (capture, ransom, debt) is not implemented.
++- **HP never decreased in the engine, so defeat could not occur there.** (v6 correction: I earlier wrote that legacy `Combat.tsx` could lower HP and trigger the end screen. `Combat.tsx` is never rendered anywhere, so nothing in the live game could lower HP and the death screen was unreachable.) `revive()` restores half HP automatically, which §7 explicitly says not to use as the default. Defeat-as-new-situation (capture, ransom, debt) is not implemented.
+ 
+ ### §8-10 Social, living world, knowledge
+ - NPC memory (event, interpretation, confidence) ✔; obligations ✔; knowledge split world/player/NPC with provenance ✔.
+@@ -215,3 +215,37 @@ The Bible has not been updated to reflect decisions made since 1.0. They are rec
+ - Finale outcomes cannot kill an NPC, change a relationship's trust/respect separately from disposition, or start a quest.
+ - Choice generation and fallback narration are tested against all six origins' first twelve turns, not against the full space of states.
+ - Nothing here was played in a browser.
++
++
++## 12. v6: martial depth and defeat (Bible §6, §7, pillar 4)
++
++**Corrections to earlier audit text.** (1) `Combat.tsx` is dead code (see §10, §7 row). (2) I wrote that the engine had "no Face": the player has a `wuxia.social.face` value (0-100) that only a successful `talk` changed (+1). Face for NPCs, and Face per context, are still absent. (3) §10 pillar 4 and the §6 row below are superseded by this section.
++
++**Bug found and fixed:** the intent interpreter turned any "with / use / using X" into a `techniqueId`, and the contract rejects a technique the player does not own, so *any* casual phrase ("attack the guard with my sword", "meditate using breathing exercises") threw an error, and in the store that discarded the turn. The interpreter now resolves the phrase to a technique the character actually owns (by id, technique name, or art name) and drops it otherwise.
++
++### What changed
++- **Techniques and requirements are enforced.** A named technique costs its Qi (previously every action cost 0 Qi), is blocked when Qi is short, and is blocked until the parent art reaches its `minMastery`. An unnamed strike costs nothing.
++- **A new `train` action** ("practise the Azure River Sword"): the missing advancement method. It raises art and technique mastery with diminishing returns (3, 2, 1 per success as mastery climbs), costs Qi and fatigue, and failure teaches nothing. Locked techniques open as mastery grows (tested: 40 practice turns unlock Whirlpool Bind).
++- **`attack` against a person is a real exchange.** The target must be present and alive (otherwise blocked; before, it "succeeded" with no effect). Difficulty comes from the opponent's power; the player's edge is attributes (fatigue and injury adjusted), art power, technique mastery, and a ±10 style counter. Opponent power is authored for the 12 seed NPCs and derived (bounded) for anyone else.
++- **Style counters are structured, not prose.** `strongAgainstArts` / `counteredByArts` on arts, `arts` on NPCs, authored as pairs and tested for validity. The digest tells the narrator when a style had the upper hand.
++- **Losing costs something.** Failure and partial success cost HP (reduced by constitution, scaled by risk posture) and add a located injury (head, torso, arm, leg or internal) with a severity and healing time.
++- **Injuries now matter mechanically:** arm/head wounds penalise fighting and practice, leg wounds raise travel and stealth difficulty, internal wounds slow Qi recovery, and resting speeds healing. (Previously nothing but a flat attribute penalty read injuries.)
++- **Defeat is a new situation, not an end screen** (§7): `mercy` (left alive, battered) always in a friendly bout or at a monastery or healer or from someone who likes you; `robbed` (two possessions taken); `detained` for the garrison (everything confiscated); and `killed` only when the player attacked a master (power 70+) with lethal, high-risk intent and lost by a wide margin. Survivors are left at 15-20% HP and lose Face. Monks never kill.
++- **Friendly bouts exist** ("challenge X to a friendly duel", "spar"): milder damage and injuries, no grudge, no faction penalty, no bystander anger, Face gained or lost, and defeat is always mercy. This also fixes a double count: the older assault fallout in `jianghu.ts` now skips honourable bouts, and the fight-specific fallout adds on top of it exactly once.
++- **Mastery cannot be farmed on bystanders**: beating someone with power under 30 teaches nothing.
++- **Death is final for origin characters.** `revive()` does nothing for them and the death screen hides "Revive"; loading a save or a new game remain. Legacy characters are unchanged.
++- The narrator digest and fallback narrator now report fights, wounds (in plain words: "your right leg"), defeat, and mastery gains, without opponent power or secrets (test-guarded). The choice generator offers practice and a fair duel.
++
++### Bible status after v6
++| Item | Before | Now |
++|---|---|---|
++| Pillar 4 Martial depth | Gap | Partial: requirements, cost, mastery, advancement and counters are enforced; mastery changes only a few numbers, there is no teacher/learning-from-NPC mechanic, no technique effects beyond cost/mastery bonus, and art compatibility (`incompatibleArts`) is still not read |
++| §7 Injury | Partial | Met for the examples given, apart from infection/chronic damage from untreated wounds (a field exists, nothing reads it) and poison |
++| §7 Defeat | Gap (and unreachable) | Met for fights with NPCs; no capture-and-ransom, forced debt or rescue storylines yet |
++| §6 Qi is not mana | Partial | Qi is spent by techniques and recovered through control, meridians and internal injuries; legacy Spellbook is still mana |
++
++### Known limits
++- NPC opponents have no HP: a fight is one resolved exchange, not a multi-round battle, and NPCs cannot die. NPC-vs-NPC fights do not exist.
++- Calibration is by measurement on the opening state only (start-level characters beat power 10-45 NPCs most of the time and lose to power 80+ ones); it has not been balance-tested over a campaign.
++- `Combat.tsx` is still dead code and `Spellbook`, `Bestiary`, `SkillTree` are not connected to any of this.
++- Nothing here was played in a browser.
+diff --git a/doc/DECISIONS.md b/doc/DECISIONS.md
+index d5c6a1b..c778e01 100644
+--- a/doc/DECISIONS.md
++++ b/doc/DECISIONS.md
+@@ -16,8 +16,15 @@ Candidate Bible §18 entries from the v2-v5 work. Each says what changed, why, a
+ | D10 | The narrator's choices are filtered to what the rules can honour and backfilled by a deterministic generator. | Bible §13 choice-generator contract. | `choiceGenerator.ts` |
+ | D11 | Rolls come from a saved seed and draw counter (`world.rng`); roll N = f(seed, N). Older saves get a seed on their first action. | Bible §4: reproducible bug reports. | `rng.ts`, `actionPipeline.ts`, `validateState` |
+ 
++| D12 | Technique text the player types is resolved to an owned technique id or dropped; it can no longer fail validation. | Any "with/using X" phrase threw and lost the turn. | `actionInterpreter.ts`, `combat.ts` |
++| D13 | Named techniques cost Qi and need `minMastery` on the parent art; unnamed strikes cost none. New `train` action raises mastery with diminishing returns. | Bible §6: arts are learned disciplines with requirements and advancement; Qi was never spent. | resolver, interpreter, content |
++| D14 | Attacks on people are a single deterministic exchange scored from opponent power, player edge and style counters, with HP loss, located injuries, and social fallout. A friendly bout ("duel / spar / challenge") is non-lethal and skips the assault penalties. | Bible §6-8, and "duels" are named in §3. | `combat.ts`, `jianghu.ts` |
++| D15 | Defeat resolves as mercy, robbery, detention or death by fixed rules; death needs a lethal, high-risk attack on a master (power 70+) with a large margin, and never happens at a monastery. Origin characters cannot revive. | Bible §7: new situations, no automatic revive. | `chooseDefeat`, store, DeathScreen |
++| D16 | Injuries have mechanical effects by region (arms: fighting; legs: travel and stealth; internal: Qi recovery); rest speeds healing. | Bible §7 examples. | `combat.ts`, `wuxiaRules.ts`, resolver |
++
+ ## Open decisions (not made)
+ - **V5 causal branching is never reached in live play** (V4 sets the shared timer first). Activating it changes outcomes: its default branch for low-severity faction events is "de-escalate", which would end disputes early. Recommendation: do not activate until finales cover the branches it would otherwise decide.
+ - **Time model** (hour/date/season/weather, travel duration from the weighted map): Bible §11, absent.
+ - **Defeat model** to replace `revive()`: capture, ransom, forced debt, scar, per Bible §7.
+-- **Resolver depth**: techniques, Qi cost, mastery and counters.
++- **Multi-round combat with NPC HP**, NPC-vs-NPC fights, capture-and-ransom and forced-debt storylines, poison and untreated-wound consequences.
++- **Teachers**: learning an art from an NPC (requirements, trust, price).
+diff --git a/src/App.tsx b/src/App.tsx
+index c6ff1d3..90f74b5 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -182,6 +182,7 @@ export default function App() {
+           level={currentGameState.character.level}
+           turnsSurvived={currentGameState.turnCount}
+           hasSaves={saveSlots.length > 0}
++          allowContinue={!currentGameState.character.originId}
+           onRespawn={(option) => {
+             if (option === 'continue') {
+               revive();
+diff --git a/src/ai/choiceGenerator.ts b/src/ai/choiceGenerator.ts
+index daef260..8d919ba 100644
+--- a/src/ai/choiceGenerator.ts
++++ b/src/ai/choiceGenerator.ts
+@@ -58,6 +58,14 @@ export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}
+   if (roads[0]) add(`Travel to ${roads[0].id}`, risk(roads[0].days), 'travel');
+ 
+   // 5. More of the above, then looking after yourself.
++  const arts = state.character.wuxia?.martialArts ?? [];
++  const rested = state.character.fatigue < 60;
++  const trainable = [...arts].sort((a, b) => a.mastery - b.mastery || a.id.localeCompare(b.id))[0];
++  if (trainable && trainable.mastery < 100 && rested) add(`Practice the ${trainable.name}`, 'low', 'train');
++  const fit = state.character.hp >= state.character.maxHp * 0.6 && rested;
++  // A fair bout: someone who fights, but not a healer, and not so far above the player that it is a death wish.
++  const sparring = people.find(p => (p.arts?.length ?? 0) > 0 && (p.power ?? 0) >= 30 && (p.power ?? 0) <= 70 && !/healer|physician|abbot/i.test(p.role));
++  if (sparring && arts.length && fit) add(`Challenge ${sparring.name} to a friendly duel`, 'medium', 'attack');
+   if (people[1]) add(`Talk to ${people[1].name}`, 'low', 'talk');
+   if (roads[1]) add(`Travel to ${roads[1].id}`, risk(roads[1].days), 'travel');
+   if (features.length > 1) add(`Inspect the ${features[(state.world.turn + 1) % features.length]}`, 'low', 'inspect');
+diff --git a/src/ai/fallbackNarrator.ts b/src/ai/fallbackNarrator.ts
+index 0a886ce..5ce6e1c 100644
+--- a/src/ai/fallbackNarrator.ts
++++ b/src/ai/fallbackNarrator.ts
+@@ -1,3 +1,4 @@
++import { regionName } from '../engine/bout';
+ import type { ActionResolution, ResolutionStatus, StateEvent } from '../engine/types';
+ 
+ export interface FallbackNarratorOptions {
+@@ -41,8 +42,17 @@ export function fallbackNarration(resolution: ActionResolution, options: Fallbac
+       else if (fact) parts.push(`You learn something, though you cannot yet be sure of it: ${fact}`);
+     } else if (e.type === 'world.finale_resolved' && witnessed(e)) {
+       parts.push(`${str(e.payload.headline) ?? ''} ${str(e.payload.description) ?? ''}`.trim());
++    } else if (e.type === 'character.combat_resolved') {
++      const foe = npcName(str(e.payload.opponentId));
++      parts.push(e.payload.outcome === 'won' ? `You bested ${foe}.` : e.payload.outcome === 'drew' ? `You and ${foe} fight to a bloody standstill.` : `${foe} gets the better of you.`);
++    } else if (e.type === 'character.defeated') {
++      const foe = npcName(str(e.payload.opponentId));
++      const out = String(e.payload.outcome);
++      parts.push(out === 'mercy' ? `${foe} spares you and lets you go.` : out === 'robbed' ? `${foe} strips you of your belongings and leaves you behind.` : out === 'detained' ? `${foe}'s people seize you and take everything you carry.` : `${foe}'s final blow lands, and you do not rise.`);
++    } else if (e.type === 'character.mastery_changed') {
++      parts.push(`Your ${str(e.payload.artName)} feels sharper than before.`);
+     } else if (e.type === 'character.injury_added') {
+-      parts.push(`You are hurt: a minor ${str(e.payload.bodyRegion) ?? 'physical'} injury.`);
++      parts.push(`You are hurt: a ${(typeof e.payload.severity === 'number' && e.payload.severity >= 3) ? 'serious' : 'minor'} injury to your ${regionName(str(e.payload.bodyRegion))}.`);
+     }
+   }
+ 
+diff --git a/src/components/DeathScreen.tsx b/src/components/DeathScreen.tsx
+index b895e26..9d1b2a5 100644
+--- a/src/components/DeathScreen.tsx
++++ b/src/components/DeathScreen.tsx
+@@ -7,9 +7,11 @@ interface DeathScreenProps {
+   turnsSurvived: number;
+   onRespawn: (option: 'continue' | 'loadSave' | 'newGame') => void;
+   hasSaves: boolean;
++  /** False for Wuxia origin characters: death is final; defeat is handled by the simulation (Bible section 7). */
++  allowContinue?: boolean;
+ }
+ 
+-export default function DeathScreen({ characterName, level, turnsSurvived, onRespawn, hasSaves }: DeathScreenProps) {
++export default function DeathScreen({ characterName, level, turnsSurvived, onRespawn, hasSaves, allowContinue = true }: DeathScreenProps) {
+   const [showOptions, setShowOptions] = useState(false);
+ 
+   const deathQuotes = [
+@@ -77,13 +79,15 @@ export default function DeathScreen({ characterName, level, turnsSurvived, onRes
+           </button>
+         ) : (
+           <div className="space-y-3 animate-fade-in">
+-            <button
+-              onClick={() => onRespawn('continue')}
+-              className="w-full bg-gradient-to-r from-green-700 to-green-600 hover:from-green-600 hover:to-green-500 text-white font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2"
+-            >
+-              <Heart className="w-5 h-5" />
+-              Revive (Lose 50% Gold)
+-            </button>
++            {allowContinue && (
++              <button
++                onClick={() => onRespawn('continue')}
++                className="w-full bg-gradient-to-r from-green-700 to-green-600 hover:from-green-600 hover:to-green-500 text-white font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2"
++              >
++                <Heart className="w-5 h-5" />
++                Revive (Lose 50% Gold)
++              </button>
++            )}
+             
+             {hasSaves && (
+               <button
+diff --git a/src/engine/actionInterpreter.ts b/src/engine/actionInterpreter.ts
+index ef158bf..b571b68 100644
+--- a/src/engine/actionInterpreter.ts
++++ b/src/engine/actionInterpreter.ts
+@@ -1,3 +1,4 @@
++import { matchTechniqueText } from './combat';
+ import type { ProposedAction, RiskLevel, SimulationState } from './types';
+ 
+ const KEYWORDS: Array<[ProposedAction['kind'], string[]]> = [
+@@ -7,6 +8,7 @@ const KEYWORDS: Array<[ProposedAction['kind'], string[]]> = [
+   ['meditate', ['meditate', 'cultivate', 'focus qi', 'circulate qi', 'breathe']],
+   ['rest', ['rest', 'sleep', 'wait quietly', 'recover', 'catch my breath']],
+   ['talk', ['talk', 'speak', 'ask ', 'question', 'negotiate', 'call out', 'persuade']],
++  ['train', ['train', 'practice', 'practise', 'drill', 'rehearse', 'hone ']],
+   ['inspect', ['inspect', 'examine', 'search', 'look ', 'read ', 'listen', 'study', 'investigate']],
+ ];
+ 
+@@ -35,9 +37,22 @@ function inferApproach(text: string): string | undefined {
+   return approaches.find(([keyword]) => text.includes(keyword))?.[1];
+ }
+ 
+-function inferTechnique(text: string): string | undefined {
+-  const match = text.match(/(?:use|with|using)\s+([a-z0-9_-]+(?:\s+[a-z0-9_-]+){0,2})/i);
+-  return match?.[1]?.trim();
++/**
++ * Resolve a technique the player names to a technique they actually own. Free text that names
++ * nothing they know ("with my sword") is dropped rather than passed on, so a casual phrase can
++ * never make an otherwise legal action fail validation.
++ */
++function inferTechnique(text: string, simulation: SimulationState): string | undefined {
++  const phrases = [
++    text.match(/(?:use|with|using)\s+(?:the\s+|my\s+)?([a-z0-9_:-]+(?:\s+[a-z0-9_:-]+){0,3})/i)?.[1],
++    text.match(/(?:practi[sc]e|drill|rehearse|hone|train)\s+(?:the\s+|my\s+)?([a-z0-9_:-]+(?:\s+[a-z0-9_:-]+){0,3})/i)?.[1],
++    text,
++  ];
++  for (const phrase of phrases) {
++    const id = phrase ? matchTechniqueText(phrase, simulation.character) : undefined;
++    if (id) return id;
++  }
++  return undefined;
+ }
+ 
+ function inferGoal(text: string, simulation: SimulationState): string | undefined {
+@@ -87,7 +102,7 @@ export function interpretPlayerAction(
+     ? inferTarget(lower, simulation)
+     : undefined;
+   const approach = inferApproach(lower);
+-  const techniqueId = kind === 'attack' || kind === 'meditate' ? inferTechnique(lower) : undefined;
++  const techniqueId = kind === 'attack' || kind === 'meditate' || kind === 'train' ? inferTechnique(lower, simulation) : undefined;
+   const intendedGoal = inferGoal(normalized, simulation);
+   const conditionalClauses = inferConditionalClauses(lower);
+   const declaredConstraints = inferDeclaredConstraints(lower);
+diff --git a/src/engine/bout.ts b/src/engine/bout.ts
+new file mode 100644
+index 0000000..d9a5503
+--- /dev/null
++++ b/src/engine/bout.ts
+@@ -0,0 +1,14 @@
++/**
++ * A friendly bout: the description says duel / spar / challenge, so nobody is trying to kill.
++ * Kept in its own module so both the Jianghu reactions and the combat rules can share it.
++ */
++export function isHonourableBout(description: string): boolean {
++  return /\b(duel|spar|sparring|challenge)\b/i.test(description) && !/\b(kill|murder|assassinate|ambush)\b/i.test(description);
++}
++
++const REGION_NAMES: Record<string, string> = {
++  head: 'head', torso: 'torso', leftArm: 'left arm', rightArm: 'right arm', leftLeg: 'left leg', rightLeg: 'right leg', internal: 'inner organs and meridians',
++};
++export function regionName(region: string | undefined): string {
++  return (region && REGION_NAMES[region]) || 'body';
++}
+diff --git a/src/engine/combat.ts b/src/engine/combat.ts
+new file mode 100644
+index 0000000..45df690
+--- /dev/null
++++ b/src/engine/combat.ts
+@@ -0,0 +1,252 @@
++import type { JianghuState, NPCState } from './jianghu';
++import type { SimulationState, StateEvent, ProposedAction, ResolutionStatus, SimCharacter } from './types';
++import type { MartialArt, MartialTechnique, WuxiaSimulationState } from './wuxia';
++import { isHonourableBout } from './bout';
++import { upsertRelationship } from './jianghu';
++import { effectiveAttribute, martialPower } from './wuxiaRules';
++
++/**
++ * Martial combat resolution (Game Bible sections 6-8): learned arts with
++ * requirements, techniques that cost Qi, counters between styles, injuries that
++ * matter, and defeat that creates a new situation instead of an end screen.
++ *
++ * Everything here is deterministic given the roll: no randomness, no LLM.
++ */
++
++const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
++const COMBAT_ART_TYPES = new Set(['external', 'sword', 'saber', 'spear', 'fist', 'palm', 'hidden_weapon']);
++const REGIONS = ['head', 'torso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg', 'internal'] as const;
++type Region = typeof REGIONS[number];
++
++type Wuxia = SimCharacter & { wuxia: NonNullable<SimCharacter['wuxia']> };
++const hasWuxia = (c: SimCharacter): c is Wuxia => !!c.wuxia;
++
++export interface ArtUse { art: MartialArt; technique?: MartialTechnique }
++
++/** The owned technique with this exact id, with its art. */
++export function findTechnique(c: SimCharacter, techniqueId?: string): ArtUse | undefined {
++  if (!techniqueId || !c.wuxia) return undefined;
++  for (const art of c.wuxia.martialArts) {
++    const technique = art.techniques.find(t => t.id === techniqueId);
++    if (technique) return { art, technique };
++  }
++  return undefined;
++}
++
++/** Turn free text ("ripple parry", "Azure River Sword", "fourth bell") into an owned technique id, if it names one. */
++export function matchTechniqueText(text: string, c: SimCharacter): string | undefined {
++  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
++  const wanted = norm(text);
++  if (!wanted || !c.wuxia) return undefined;
++  for (const art of c.wuxia.martialArts) {
++    for (const t of art.techniques) {
++      const name = norm(t.name);
++      if (norm(t.id) === wanted || name.includes(wanted) || wanted.includes(name)) return t.id;
++    }
++  }
++  for (const art of c.wuxia.martialArts) {
++    const name = norm(art.name);
++    if (name === wanted || wanted.includes(name)) {
++      // Naming only the art means its basic form: the cheapest technique, best-practised on ties.
++      return [...art.techniques].sort((a, b) => a.qiCost - b.qiCost || b.mastery - a.mastery || a.id.localeCompare(b.id))[0]?.id;
++    }
++  }
++  return undefined;
++}
++
++export function bestCombatArt(c: SimCharacter): MartialArt | undefined {
++  return (c.wuxia?.martialArts ?? [])
++    .filter(a => COMBAT_ART_TYPES.has(a.type))
++    .sort((a, b) => martialPower(b) - martialPower(a) || a.id.localeCompare(b.id))[0];
++}
++
++export function techniqueLocked(art: MartialArt, technique: MartialTechnique): boolean {
++  return technique.minMastery !== undefined && art.mastery < technique.minMastery;
++}
++
++export function opponentPower(npc: NPCState): number {
++  return clamp(npc.power ?? 10 + Math.floor(npc.resources / 2) + 3 * npc.skills.length, 5, 95);
++}
++
++/** +10 when the art has the upper hand against any of the opponent's arts, -10 when it is countered. */
++export function counterBonus(art: MartialArt | undefined, npc: NPCState): number {
++  if (!art) return 0;
++  const theirs = npc.arts ?? [];
++  const up = (art.strongAgainstArts ?? []).some(id => theirs.includes(id)) ? 10 : 0;
++  const down = (art.counteredByArts ?? []).some(id => theirs.includes(id)) ? 10 : 0;
++  return up - down;
++}
++
++/** Region-specific handicaps (Bible section 7): arms and head hamper fighting, legs hamper travel and stealth. */
++export function injuryPenalty(c: SimCharacter, kind: ProposedAction['kind']): number {
++  let penalty = 0;
++  for (const injury of c.wuxia?.injuries ?? []) {
++    const arm = injury.bodyRegion === 'leftArm' || injury.bodyRegion === 'rightArm';
++    const leg = injury.bodyRegion === 'leftLeg' || injury.bodyRegion === 'rightLeg';
++    if (kind === 'attack' || kind === 'train') penalty += arm ? injury.severity * 2 : injury.bodyRegion === 'head' ? injury.severity * 2 : 0;
++    if (kind === 'travel' || kind === 'stealth') penalty += leg ? injury.severity * 5 : 0;
++  }
++  return penalty;
++}
++
++/** How strong the player is in this exchange (added to the roll). */
++export function combatEdge(c: SimCharacter, use: ArtUse | undefined, npc: NPCState): number {
++  const base = hasWuxia(c)
++    ? Math.floor((effectiveAttribute(c as WuxiaSimulationState, 'strength') + effectiveAttribute(c as WuxiaSimulationState, 'agility')) / 2)
++    : Math.floor((c.attributes.strength + c.attributes.agility) / 2);
++  const art = use ? Math.floor(martialPower(use.art) / 5) : 0;
++  const tech = use?.technique ? Math.floor(use.technique.mastery / 10) : 0;
++  return base + art + tech + counterBonus(use?.art, npc) - injuryPenalty(c, 'attack');
++}
++
++export function duelDifficulty(npc: NPCState, risk: ProposedAction['risk'], luck: number): number {
++  const riskMod = risk === 'low' ? -10 : risk === 'high' ? 10 : 0;
++  return clamp(20 + Math.floor(opponentPower(npc) * 0.6) + riskMod - Math.floor(luck / 5), 5, 95);
++}
++
++export { isHonourableBout };
++
++/** Mastery gained from use or practice; diminishes as mastery rises. */
++export function masteryGain(status: ResolutionStatus, mastery: number, practice: boolean): number {
++  const base = practice ? (status === 'success' ? 3 : status === 'partial' ? 2 : 0) : (status === 'success' ? 2 : 1);
++  return base === 0 ? 0 : Math.max(1, base - Math.floor(mastery / 40));
++}
++
++export function applyMastery(c: SimCharacter, use: ArtUse | undefined, gain: number, events: StateEvent[]): void {
++  if (!use || gain <= 0) return;
++  const before = use.art.mastery;
++  use.art.mastery = clamp(use.art.mastery + gain, 0, 100);
++  if (use.technique) use.technique.mastery = clamp(use.technique.mastery + Math.max(1, Math.floor(gain / 2) + 1), 0, 100);
++  if (use.art.mastery !== before) {
++    events.push({
++      type: 'character.mastery_changed', causes: [`art:${use.art.id}`, use.technique ? `technique:${use.technique.id}` : 'practice'],
++      witnesses: [c.id], knowledgeConsequences: [`player:skill:${use.art.id}`],
++      payload: { artId: use.art.id, artName: use.art.name, from: before, to: use.art.mastery },
++    });
++  }
++}
++
++export type DefeatOutcome = 'mercy' | 'robbed' | 'detained' | 'killed';
++
++/** Pure rule for what a defeat means (Bible section 7): a new situation, with death only when the circumstances justify it. */
++export function chooseDefeat(args: {
++  jianghu: JianghuState; opponent: NPCState; honourable: boolean; risk: ProposedAction['risk']; margin: number;
++}): DefeatOutcome {
++  const { jianghu, opponent, honourable, risk, margin } = args;
++  if (honourable) return 'mercy';
++  const faction = jianghu.factions.find(f => f.id === opponent.factionId);
++  if (faction?.type === 'religious' || /healer|abbot|physician/i.test(opponent.role) || opponent.disposition >= 10) return 'mercy';
++  if (risk === 'high' && opponent.skills.length > 0 && opponentPower(opponent) >= 70 && margin >= 30) return 'killed';
++  if (faction?.type === 'court') return 'detained';
++  return 'robbed';
++}
++
++export interface DuelInput {
++  state: SimulationState;
++  c: SimCharacter;
++  opponent: NPCState;
++  status: ResolutionStatus;
++  roll: number;
++  score: number;
++  difficulty: number;
++  use?: ArtUse;
++  action: ProposedAction;
++  qiSpent: number;
++}
++
++/** Apply a resolved duel in place: damage, injury, defeat, social and faction fallout, mastery. */
++export function applyDuel(input: DuelInput, events: StateEvent[]): void {
++  const { state, c, opponent, status, roll, score, difficulty, use, action, qiSpent } = input;
++  const jianghu = state.jianghu!;
++  const turn = state.world.turn;
++  const honourable = isHonourableBout(action.description);
++  const power = opponentPower(opponent);
++  const margin = Math.max(0, difficulty - score);
++  const bystanders = jianghu.npcs.filter(n => n.alive && n.id !== opponent.id && n.locationId === c.locationId);
++
++  // --- damage and injury to the player
++  let damage = 0;
++  if (status !== 'success') {
++    const riskMul = action.risk === 'high' ? 1.5 : action.risk === 'low' ? 0.75 : 1;
++    const base = 6 + Math.floor(power / 4) + Math.floor(margin / 3);
++    damage = Math.max(1, Math.round(base * riskMul * (honourable ? 0.6 : 1)) - Math.floor(c.attributes.constitution / 5));
++    if (status === 'partial') damage = Math.max(1, Math.floor(damage / 2));
++    damage = Math.min(damage, c.hp);
++  }
++  if (damage > 0) {
++    c.hp -= damage;
++    events.push({ type: 'character.hp_changed', causes: ['action:attack', `opponent:${opponent.id}`], payload: { amount: -damage, reason: 'combat' } });
++    if (hasWuxia(c)) {
++      const severityCap = honourable ? 2 : 4;
++      const severity = clamp(status === 'partial' ? 1 : 1 + (margin >= 15 ? 1 : 0) + (damage >= 25 ? 1 : 0), 1, severityCap);
++      const bodyRegion: Region = REGIONS[(roll + turn) % REGIONS.length];
++      const injury = { id: `wound-${turn + 1}-${opponent.id}`, severity, bodyRegion, healingTurns: severity * 4 + 2, untreated: true };
++      c.wuxia.injuries.push(injury);
++      events.push({ type: 'character.injury_added', causes: ['action:attack', `opponent:${opponent.id}`], witnesses: [c.id], payload: { id: injury.id, severity, bodyRegion } });
++    }
++  }
++
++  const counter = counterBonus(use?.art, opponent);
++  const outcome = status === 'success' ? 'won' : status === 'partial' ? 'drew' : 'lost';
++  events.push({
++    type: 'character.combat_resolved',
++    causes: ['action:attack', `resolution:${status}`, `opponent:${opponent.id}`],
++    witnesses: [c.id, opponent.id, ...bystanders.map(n => n.id)],
++    payload: {
++      opponentId: opponent.id, outcome, damage, honourable, qiSpent, artId: use?.art.id ?? null, techniqueId: use?.technique?.id ?? null,
++      counter: counter > 0 ? 'advantage' : counter < 0 ? 'disadvantage' : 'even',
++    },
++  });
++
++  // --- fallout with the opponent, their faction and onlookers.
++  // An assault already costs trust, goodwill and faction standing in the Jianghu reaction pass
++  // (jianghu.ts); this adds what depends on HOW the fight went. A friendly bout skips that pass.
++  opponent.memories.push({
++    id: `memory-${opponent.id}-${turn}-fight`,
++    event: honourable ? `Crossed blades with ${c.name} in a bout` : `Fought ${c.name}`,
++    interpretation: outcome === 'won' ? `${c.name} bested me${honourable ? ' fairly' : ''}` : outcome === 'drew' ? `${c.name} held their own against me` : `I bested ${c.name}`,
++    valence: honourable ? 'neutral' : 'negative', confidence: 90, turn,
++  });
++  const rel = upsertRelationship(jianghu.relationships, c.id, opponent.id, turn);
++  if (honourable) {
++    opponent.disposition = clamp(opponent.disposition - 5, -100, 100);
++    rel.respect = clamp(rel.respect + (outcome === 'lost' ? -2 : 8), -100, 100);
++  } else {
++    opponent.disposition = clamp(opponent.disposition - 15, -100, 100);
++    rel.trust = clamp(rel.trust - 20, -100, 100);
++    rel.grudge = clamp(rel.grudge + 20, 0, 100);
++    rel.fear = clamp(rel.fear + (outcome === 'won' ? 17 : 0), 0, 100);
++    rel.respect = clamp(rel.respect + (outcome === 'won' ? 5 : outcome === 'drew' ? 10 : -5), -100, 100);
++    const faction = jianghu.factions.find(f => f.id === opponent.factionId);
++    if (faction) faction.playerReputation = clamp(faction.playerReputation - 5, -100, 100);
++    for (const n of bystanders) n.disposition = clamp(n.disposition - 3, -100, 100);
++  }
++  if (hasWuxia(c)) {
++    const face = c.wuxia.social.face;
++    c.wuxia.social.face = clamp(face + (outcome === 'won' && power >= (honourable ? 40 : 50) ? (honourable ? 8 : 5) : outcome === 'lost' ? (honourable ? -10 : -8) : 0), 0, 100);
++  }
++
++  // --- art mastery from the exchange
++  // Beating someone far weaker teaches nothing, so attacking bystanders cannot be farmed for mastery.
++  applyMastery(c, use, status === 'success' && power < 30 ? 0 : masteryGain(status, use?.art.mastery ?? 0, false), events);
++
++  // --- defeat creates a new situation
++  if (c.hp <= 0) {
++    const defeat = chooseDefeat({ jianghu, opponent, honourable, risk: action.risk, margin });
++    let itemsLost: string[] = [];
++    if (defeat === 'killed') {
++      c.hp = 0;
++    } else {
++      c.hp = Math.max(1, Math.ceil(c.maxHp * (defeat === 'mercy' ? 0.2 : 0.15)));
++      if (defeat === 'robbed') { itemsLost = c.inventory.slice(-2); c.inventory = c.inventory.slice(0, Math.max(0, c.inventory.length - 2)); }
++      if (defeat === 'detained') { itemsLost = [...c.inventory]; c.inventory = []; c.fatigue = clamp(c.fatigue + 30, 0, 100); }
++      if (hasWuxia(c)) c.wuxia.social.face = clamp(c.wuxia.social.face - (honourable ? 0 : 15), 0, 100);
++    }
++    events.push({
++      type: 'character.defeated',
++      causes: ['action:attack', `opponent:${opponent.id}`, `defeat:${defeat}`],
++      witnesses: [c.id, opponent.id, ...bystanders.map(n => n.id)],
++      payload: { outcome: defeat, opponentId: opponent.id, itemsLost: itemsLost.length, hp: c.hp },
++    });
++  }
++}
+diff --git a/src/engine/jianghu.ts b/src/engine/jianghu.ts
+index 648da46..bbc77dd 100644
+--- a/src/engine/jianghu.ts
++++ b/src/engine/jianghu.ts
+@@ -1,4 +1,5 @@
+ import type { ProposedAction, SimulationState, StateEvent } from './types';
++import { isHonourableBout } from './bout';
+ import type { FinaleSpec } from './finale';
+ 
+ export type MemoryValence = 'positive' | 'negative' | 'neutral';
+@@ -38,6 +39,10 @@ export interface NPCState {
+   resources: number;
+   memories: NPCMemory[];
+   alive: boolean;
++  /** Combat strength 0..100; when absent it is derived from resources and skills. */
++  power?: number;
++  /** Martial art ids this NPC practises (used for counters). */
++  arts?: string[];
+ }
+ 
+ export interface FactionState {
+@@ -301,7 +306,7 @@ function clamp(value: number, min: number, max: number): number {
+   return Math.max(min, Math.min(max, value));
+ }
+ 
+-function upsertRelationship(
++export function upsertRelationship(
+   relationships: RelationshipState[],
+   subjectId: string,
+   targetId: string,
+@@ -367,7 +372,8 @@ export function applyJianghuAction(
+     }
+   }
+ 
+-  if (action.kind === 'attack' && action.targetId) {
++  // A friendly bout is not an assault: combat.ts applies its own, gentler consequences.
++  if (action.kind === 'attack' && action.targetId && !isHonourableBout(action.description)) {
+     const npc = jianghu.npcs.find(n => n.id === action.targetId);
+     if (npc && npc.alive) {
+       const relationship = upsertRelationship(jianghu.relationships, simulation.character.id, npc.id, turn);
+diff --git a/src/engine/narratorDigest.ts b/src/engine/narratorDigest.ts
+index 66c9b9b..3e6a7a1 100644
+--- a/src/engine/narratorDigest.ts
++++ b/src/engine/narratorDigest.ts
+@@ -1,3 +1,4 @@
++import { regionName } from './bout';
+ import { chainPace } from './jianghu';
+ import type { ActionResolution, StateEvent } from './types';
+ 
+@@ -59,6 +60,29 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
+         }
+         break;
+       }
++      case 'character.combat_resolved': {
++        const foe = npcName(str(e.payload.opponentId));
++        const how = e.payload.honourable === true ? 'in a bout' : 'in a fight';
++        const verdict = e.payload.outcome === 'won' ? `You bested ${foe} ${how}.` : e.payload.outcome === 'drew' ? `You and ${foe} fought to a bloody standstill ${how}.` : `${foe} got the better of you ${how}.`;
++        const edge = e.payload.counter === 'advantage' ? ' Your style had the upper hand against theirs.' : e.payload.counter === 'disadvantage' ? ' Their style gave them the upper hand against yours.' : '';
++        happened.push(`${verdict}${edge}`);
++        break;
++      }
++      case 'character.defeated': {
++        const foe = npcName(str(e.payload.opponentId));
++        const lost = num(e.payload.itemsLost) ?? 0;
++        const text: Record<string, string> = {
++          mercy: `${foe} spares you and lets you go, battered but alive.`,
++          robbed: `${foe} strips you of ${lost} possession${lost === 1 ? '' : 's'} and leaves you in the dust.`,
++          detained: `${foe}'s people seize you and confiscate everything you carry.`,
++          killed: `${foe}'s final blow lands, and you do not rise.`,
++        };
++        happened.push(text[String(e.payload.outcome)] ?? 'You are defeated.');
++        break;
++      }
++      case 'character.mastery_changed':
++        happened.push(`Your ${str(e.payload.artName)} feels sharper than before.`);
++        break;
+       case 'world.finale_resolved':
+         if (witnessed(e)) happened.push(`A decisive moment unfolded before you: ${str(e.payload.headline)} ${str(e.payload.description) ?? ''}`.trim());
+         break;
+@@ -66,7 +90,7 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
+         if (witnessed(e) && action.kind === 'talk') happened.push(`The conversation went well; ${npcName(action.targetId)} warmed to you slightly.`);
+         break;
+       case 'character.injury_added':
+-        happened.push(`You suffered a minor ${str(e.payload.bodyRegion) ?? 'physical'} injury.`);
++        happened.push(`You suffered a ${(num(e.payload.severity) ?? 1) >= 3 ? 'serious' : 'minor'} injury to your ${regionName(str(e.payload.bodyRegion))}.`);
+         break;
+       case 'character.hp_changed':
+         if ((num(e.payload.amount) ?? 0) < 0) happened.push(`You lost ${Math.abs(num(e.payload.amount) ?? 0)} HP.`);
+diff --git a/src/engine/resolveAction.ts b/src/engine/resolveAction.ts
+index 6635b03..49b65d7 100644
+--- a/src/engine/resolveAction.ts
++++ b/src/engine/resolveAction.ts
+@@ -7,6 +7,7 @@ import type {
+ } from './types';
+ import { validateState } from './validateState';
+ import { qiRecovery } from './wuxiaRules';
++import { applyDuel, applyMastery, bestCombatArt, duelDifficulty, findTechnique, combatEdge, injuryPenalty, masteryGain, techniqueLocked, type ArtUse } from './combat';
+ import { syncInjuries } from './wuxia';
+ import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
+ import { applyCausalityV3 } from './jianghuCausalityV3';
+@@ -23,6 +24,7 @@ const DIFFICULTY: Record<ProposedAction['kind'], number> = {
+   attack: 50,
+   meditate: 40,
+   rest: 20,
++  train: 30,
+   other: 45,
+ };
+ 
+@@ -119,8 +121,30 @@ export function resolveAction(
+     return entries;
+   };
+   const c = state.character;
+-  const qiCost = normalizedAction.qiCost ?? (normalizedAction.kind === 'attack' ? 0 : normalizedAction.kind === 'meditate' ? 0 : 0);
+-  const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' ? 2 : normalizedAction.kind === 'travel' ? 2 : 1);
++  // A named technique costs its Qi; plain strikes, talk and travel cost none.
++  const named: ArtUse | undefined = findTechnique(c, normalizedAction.techniqueId);
++  const qiCost = normalizedAction.qiCost ?? named?.technique?.qiCost ?? 0;
++  const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' || normalizedAction.kind === 'travel' || normalizedAction.kind === 'train' ? 2 : 1);
++  const blockedNow = (summary: string, difficulty: number): ActionResolution => ({
++    status: 'blocked', summary, action: normalizedAction, state,
++    events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
++    ledger: persistLedger('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
++    roll, difficulty,
++  });
++
++  const duelTarget = normalizedAction.kind === 'attack' && normalizedAction.targetId
++    ? state.jianghu?.npcs.find(n => n.id === normalizedAction.targetId)
++    : undefined;
++  if (duelTarget && (!duelTarget.alive || duelTarget.locationId !== c.locationId)) {
++    return blockedNow('No one by that name is here to fight.', DIFFICULTY.attack);
++  }
++  const practiceUse: ArtUse | undefined = normalizedAction.kind === 'train'
++    ? (named ?? (bestCombatArt(c) ? { art: bestCombatArt(c)! } : c.wuxia?.martialArts[0] ? { art: c.wuxia.martialArts[0] } : undefined))
++    : undefined;
++  if (normalizedAction.kind === 'train' && !practiceUse) return blockedNow('You know no martial art to practise.', DIFFICULTY.train);
++  if (named?.technique && techniqueLocked(named.art, named.technique)) {
++    return blockedNow(`You have not yet mastered ${named.technique.name}; it needs ${named.technique.minMastery} mastery of ${named.art.name}.`, DIFFICULTY[normalizedAction.kind]);
++  }
+ 
+   if (normalizedAction.kind === 'travel') {
+     if (!normalizedAction.destinationId || !state.world.locationIds.includes(normalizedAction.destinationId)) {
+@@ -149,8 +173,14 @@ export function resolveAction(
+     };
+   }
+ 
+-  const difficulty = clamp(DIFFICULTY[normalizedAction.kind] + RISK_MODIFIER[normalizedAction.riskPosture ?? normalizedAction.risk] - Math.floor(c.attributes.luck / 5), 5, 95);
+-  const score = roll + Math.floor((c.attributes.perception + c.attributes.agility) / 4);
++  const attackUse: ArtUse | undefined = named ?? (normalizedAction.kind === 'attack' && bestCombatArt(c) ? { art: bestCombatArt(c)! } : undefined);
++  let difficulty = clamp(DIFFICULTY[normalizedAction.kind] + RISK_MODIFIER[normalizedAction.riskPosture ?? normalizedAction.risk] - Math.floor(c.attributes.luck / 5), 5, 95)
++    + injuryPenalty(c, normalizedAction.kind);
++  let score = roll + Math.floor((c.attributes.perception + c.attributes.agility) / 4);
++  if (duelTarget) {
++    difficulty = duelDifficulty(duelTarget, normalizedAction.riskPosture ?? normalizedAction.risk, c.attributes.luck);
++    score = roll + combatEdge(c, attackUse, duelTarget);
++  }
+   let status: ActionResolution['status'];
+ 
+   if (normalizedAction.kind === 'rest') {
+@@ -160,6 +190,8 @@ export function resolveAction(
+     c.hp += restoredHp;
+     events.push({ type: 'character.hp_changed', causes: ['action:rest'], payload: { amount: restoredHp, reason: 'rest' } });
+     events.push({ type: 'character.fatigue_changed', causes: ['action:rest'], payload: { value: c.fatigue } });
++    // Rest is how wounds close faster (Bible section 7: recovery).
++    if (c.wuxia) c.wuxia.injuries = c.wuxia.injuries.map(i => ({ ...i, healingTurns: Math.max(1, i.healingTurns - 1) }));
+   } else if (normalizedAction.kind === 'meditate') {
+     status = 'success';
+     const restoredQi = Math.min(
+@@ -182,7 +214,7 @@ export function resolveAction(
+     status = 'failure';
+   }
+ 
+-  if (status === 'failure' && normalizedAction.kind === 'attack' && normalizedAction.risk === 'high' && c.wuxia) {
++  if (status === 'failure' && normalizedAction.kind === 'attack' && normalizedAction.risk === 'high' && c.wuxia && !duelTarget) {
+     const injury = {
+       id: `backlash-${state.world.turn + 1}`,
+       severity: 1,
+@@ -209,9 +241,20 @@ export function resolveAction(
+     });
+   }
+ 
+-  if (normalizedAction.kind !== 'rest' && normalizedAction.kind !== 'meditate') {
++  if (duelTarget && state.jianghu && (status === 'success' || status === 'partial' || status === 'failure')) {
++    // Qi is spent first so a defeat reads the post-exchange state.
++    c.qi -= qiCost;
++    applyDuel({ state, c, opponent: duelTarget, status, roll, score, difficulty, use: attackUse, action: normalizedAction, qiSpent: qiCost }, events);
++    if (qiCost > 0) events.push({ type: 'character.qi_changed', causes: ['action:attack', 'resource:qi'], payload: { amount: -qiCost, reason: 'technique' } });
++  } else if (normalizedAction.kind === 'train' && practiceUse) {
+     c.qi -= qiCost;
+-    if (qiCost > 0) events.push({ type: 'character.qi_changed', causes: [`action:${normalizedAction.kind}`, 'resource:qi'], payload: { amount: -qiCost, reason: normalizedAction.kind } });
++    if (qiCost > 0) events.push({ type: 'character.qi_changed', causes: ['action:train', 'resource:qi'], payload: { amount: -qiCost, reason: 'practice' } });
++    applyMastery(c, practiceUse, masteryGain(status, practiceUse.art.mastery, true), events);
++  }
++
++  if (normalizedAction.kind !== 'rest' && normalizedAction.kind !== 'meditate') {
++    if (!duelTarget && normalizedAction.kind !== 'train') c.qi -= qiCost;
++    if (qiCost > 0 && !duelTarget && normalizedAction.kind !== 'train') events.push({ type: 'character.qi_changed', causes: [`action:${normalizedAction.kind}`, 'resource:qi'], payload: { amount: -qiCost, reason: normalizedAction.kind } });
+     if (status === 'success' && normalizedAction.kind === 'travel' && normalizedAction.destinationId) {
+       const from = c.locationId;
+       c.locationId = normalizedAction.destinationId;
+diff --git a/src/engine/types.ts b/src/engine/types.ts
+index 46998d8..6748364 100644
+--- a/src/engine/types.ts
++++ b/src/engine/types.ts
+@@ -12,6 +12,7 @@ export type ActionKind =
+   | 'attack'
+   | 'meditate'
+   | 'rest'
++  | 'train'
+   | 'other';
+ 
+ export type RiskLevel = 'low' | 'medium' | 'high';
+@@ -104,6 +105,9 @@ export interface StateEvent {
+     | 'character.qi_changed'
+     | 'character.fatigue_changed'
+     | 'character.injury_added'
++    | 'character.mastery_changed'
++    | 'character.combat_resolved'
++    | 'character.defeated'
+     | 'character.social_changed'
+     | 'world.location_changed'
+     | 'world.fact_discovered'
+diff --git a/src/engine/wuxia.ts b/src/engine/wuxia.ts
+index 0741601..85760c3 100644
+--- a/src/engine/wuxia.ts
++++ b/src/engine/wuxia.ts
+@@ -28,6 +28,8 @@ export interface MartialTechnique {
+   description: string;
+   qiCost: number;
+   mastery: number; // 0..100
++  /** The parent art's mastery needed before this technique can be used. */
++  minMastery?: number;
+ }
+ 
+ export interface MartialArt {
+@@ -41,6 +43,9 @@ export interface MartialArt {
+   compatibleArts?: string[];
+   incompatibleArts?: string[];
+   weaknesses?: string[];
++  /** Art ids this art has the upper hand against / that have the upper hand against it. */
++  strongAgainstArts?: string[];
++  counteredByArts?: string[];
+ }
+ 
+ export interface CultivationState {
+diff --git a/src/engine/wuxiaRules.ts b/src/engine/wuxiaRules.ts
+index 1b1b114..304e38e 100644
+--- a/src/engine/wuxiaRules.ts
++++ b/src/engine/wuxiaRules.ts
+@@ -28,5 +28,7 @@ export function qiRecovery(character: WuxiaSimulationState, baseAmount: number):
+   const control = character.wuxia.cultivation.qiControl / 100;
+   const meridian = character.wuxia.cultivation.meridianIntegrity / 100;
+   const fatiguePenalty = Math.max(0.25, 1 - character.fatigue / 150);
+-  return Math.max(1, Math.floor(baseAmount * control * meridian * fatiguePenalty));
++  const internal = character.wuxia.injuries.filter(i => i.bodyRegion === 'internal').reduce((sum, i) => sum + i.severity, 0);
++  const internalPenalty = Math.max(0.25, 1 - internal * 0.15);
++  return Math.max(1, Math.floor(baseAmount * control * meridian * fatiguePenalty * internalPenalty));
+ }
+diff --git a/src/store/gameStore.ts b/src/store/gameStore.ts
+index baa1b6f..74cec09 100644
+--- a/src/store/gameStore.ts
++++ b/src/store/gameStore.ts
+@@ -732,6 +732,8 @@ export const useGameStore = create<GameStore>()(
+       
+       revive: () => {
+         const { gameState } = get();
++        // Origin characters do not auto-revive: defeat is resolved by the simulation, and death is final.
++        if (gameState.character?.originId) return;
+         if (gameState.character) {
+           const revivedHp = Math.floor(gameState.character.stats.maxHp / 2);
+           const updatedCharacter = {
+diff --git a/src/world/content/jianghuSeed.ts b/src/world/content/jianghuSeed.ts
+index 110df75..317271e 100644
+--- a/src/world/content/jianghuSeed.ts
++++ b/src/world/content/jianghuSeed.ts
+@@ -22,6 +22,22 @@ const goal = (id: string, kind: NPCState['goals'][number]['kind'], description:
+ const npc = (partial: Omit<NPCState, 'disposition' | 'memories' | 'alive'> & { disposition?: number }): NPCState =>
+   ({ disposition: 0, memories: [], alive: true, ...partial });
+ 
++/** Combat strength (0-100) and practised arts for NPCs who can fight; everyone else derives a modest default. */
++const COMBAT: Record<string, { power: number; arts: string[] }> = {
++  'npc-teahouse-keeper': { power: 10, arts: [] },
++  'npc-wandering-swordsman': { power: 62, arts: ['art-azure-river-sword'] },
++  'npc-yun-shuang': { power: 20, arts: ['art-heart-sutra-touch'] },
++  'npc-bai-qingshan': { power: 85, arts: ['art-azure-river-sword', 'art-nine-bell-breathing'] },
++  'npc-gu-wen': { power: 66, arts: ['art-azure-river-sword'] },
++  'npc-ma-tie': { power: 42, arts: [] },
++  'npc-abbot-huiyuan': { power: 80, arts: ['art-nine-bell-breathing', 'art-heart-sutra-touch'] },
++  'npc-lian-xiaoyue': { power: 55, arts: ['art-crimson-lotus-needles'] },
++  'npc-zhao-rong': { power: 60, arts: ['art-frostbell-spear', 'art-iron-mountain-palm'] },
++  'npc-ah-lin': { power: 14, arts: [] },
++  'npc-su-mian': { power: 48, arts: ['art-foxfire-steps'] },
++  'npc-archivist-mo': { power: 92, arts: [] },
++};
++
+ export const FACTIONS: FactionState[] = [
+   { id: 'faction-jade-hall', name: 'Jade Hall', type: 'sect',
+     description: 'An orthodox sword sect that prizes reputation, sworn oaths, and the Azure River Sword. Its aging master has not named an heir.',
+@@ -142,6 +158,11 @@ export const NPC_PROFILES: NpcProfile[] = [
+       skills: ['scholarship', 'languages', 'ancient arts'], resources: 15 }) },
+ ];
+ 
++for (const profile of NPC_PROFILES) {
++  const combat = COMBAT[profile.npc.id];
++  if (combat) { profile.npc.power = combat.power; profile.npc.arts = [...combat.arts]; }
++}
++
+ export const RELATIONSHIPS: RelationshipState[] = [
+   { id: 'rel-npc-bai-qingshan-npc-gu-wen', subjectId: 'npc-bai-qingshan', targetId: 'npc-gu-wen', trust: 20, respect: 60, fear: 0, affection: 35, debt: 0, grudge: 0 },
+   { id: 'rel-npc-gu-wen-npc-bai-qingshan', subjectId: 'npc-gu-wen', targetId: 'npc-bai-qingshan', trust: 10, respect: 50, fear: 15, affection: 20, debt: 0, grudge: 15 },
+diff --git a/src/world/content/martialArts.ts b/src/world/content/martialArts.ts
+index 7eec9c8..5410ea2 100644
+--- a/src/world/content/martialArts.ts
++++ b/src/world/content/martialArts.ts
+@@ -164,6 +164,32 @@ export const MARTIAL_ARTS: MartialArtProfile[] = [
+   },
+ ];
+ 
++/**
++ * Structured style relationships (the prose `strongAgainst` / `counteredBy` above is flavour for
++ * the narrator; these ids are what the combat rules read). Authored in pairs so a counter is
++ * felt from both sides.
++ */
++const STYLE_EDGES: Record<string, { strongAgainst: string[]; counteredBy: string[] }> = {
++  'art-azure-river-sword': { strongAgainst: ['art-willow-leaf-saber'], counteredBy: ['art-iron-mountain-palm'] },
++  'art-iron-mountain-palm': { strongAgainst: ['art-azure-river-sword', 'art-willow-leaf-saber', 'art-frostbell-spear'], counteredBy: ['art-swallow-skimming-steps', 'art-crimson-lotus-needles'] },
++  'art-crimson-lotus-needles': { strongAgainst: ['art-iron-mountain-palm'], counteredBy: ['art-nine-bell-breathing'] },
++  'art-nine-bell-breathing': { strongAgainst: ['art-crimson-lotus-needles', 'art-foxfire-steps'], counteredBy: [] },
++  'art-willow-leaf-saber': { strongAgainst: [], counteredBy: ['art-azure-river-sword', 'art-iron-mountain-palm', 'art-frostbell-spear'] },
++  'art-frostbell-spear': { strongAgainst: ['art-willow-leaf-saber'], counteredBy: ['art-iron-mountain-palm'] },
++  'art-swallow-skimming-steps': { strongAgainst: ['art-iron-mountain-palm'], counteredBy: [] },
++  'art-foxfire-steps': { strongAgainst: [], counteredBy: ['art-nine-bell-breathing'] },
++};
++/** Parent-art mastery a technique needs before it can be used (enforced by the resolver). */
++const TECHNIQUE_REQUIREMENTS: Record<string, number> = {
++  'tech-whirlpool-bind': 40, 'tech-ninth-bell': 50, 'tech-lantern-veil': 30,
++  'tech-rockfall-strike': 25, 'tech-icefall-thrust': 30, 'tech-meridian-push': 30, 'tech-lotus-sting': 25,
++};
++for (const profile of MARTIAL_ARTS) {
++  const edges = STYLE_EDGES[profile.art.id];
++  if (edges) { profile.art.strongAgainstArts = edges.strongAgainst; profile.art.counteredByArts = edges.counteredBy; }
++  for (const t of profile.art.techniques) if (TECHNIQUE_REQUIREMENTS[t.id] !== undefined) t.minMastery = TECHNIQUE_REQUIREMENTS[t.id];
++}
++
+ export const ARTS_BY_ID: Record<string, MartialArtProfile> = Object.fromEntries(
+   MARTIAL_ARTS.map(profile => [profile.art.id, profile]),
+ );
+@@ -181,6 +207,8 @@ export function instantiateArt(id: string, mastery = 0): MartialArt {
+     ...profile.art,
+     mastery: clamped,
+     techniques: profile.art.techniques.map(t => ({ ...t, mastery: Math.floor(clamped / 2) })),
++    strongAgainstArts: profile.art.strongAgainstArts ? [...profile.art.strongAgainstArts] : undefined,
++    counteredByArts: profile.art.counteredByArts ? [...profile.art.counteredByArts] : undefined,
+     compatibleArts: profile.art.compatibleArts ? [...profile.art.compatibleArts] : undefined,
+     incompatibleArts: profile.art.incompatibleArts ? [...profile.art.incompatibleArts] : undefined,
+     weaknesses: profile.art.weaknesses ? [...profile.art.weaknesses] : undefined,
+diff --git a/test/simulation/combat.test.ts b/test/simulation/combat.test.ts
+new file mode 100644
+index 0000000..25f80f7
+--- /dev/null
++++ b/test/simulation/combat.test.ts
+@@ -0,0 +1,243 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { chooseDefeat, counterBonus, injuryPenalty, masteryGain, matchTechniqueText, opponentPower } from '../../src/engine/combat';
++import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
++import { buildNarratorDigest } from '../../src/engine/narratorDigest';
++import { qiRecovery } from '../../src/engine/wuxiaRules';
++import { fallbackNarration } from '../../src/ai/fallbackNarrator';
++import { resolveAction } from '../../src/engine/resolveAction';
++import type { RiskLevel, SimulationState } from '../../src/engine/types';
++import { validateState } from '../../src/engine/validateState';
++import { ARTS_BY_ID, NPC_PROFILES, buildDigestOptions, createWuxiaSimulation, instantiateArt } from '../../src/world/content';
++
++const options = buildDigestOptions();
++const run = (sim: SimulationState, text: string, roll: number, risk: RiskLevel = 'medium') =>
++  resolveAction(sim, interpretPlayerAction(text, sim, risk), roll);
++const disciple = () => createWuxiaSimulation('origin-disgraced-disciple'); // Azure River Sword 22, at The Crossroads with the swordsman and tea keeper
++const npc = (sim: SimulationState, id: string) => sim.jianghu!.npcs.find(n => n.id === id)!;
++
++test('a casual technique phrase can no longer crash a turn; real technique names resolve to owned technique ids', () => {
++  const sim = disciple();
++  for (const text of ['Attack the Wandering Swordsman with my sword', 'Meditate using breathing exercises', 'Rest with a blanket', 'Attack Old Tea Keeper using a stick']) {
++    assert.doesNotThrow(() => run(sim, text, 60), text);
++    assert.equal(interpretPlayerAction(text, sim).techniqueId, undefined, text);
++  }
++  assert.equal(interpretPlayerAction('Attack Old Tea Keeper using Ripple Parry', sim).techniqueId, 'tech-ripple-parry');
++  assert.equal(matchTechniqueText('current cutting thrust', sim.character), 'tech-current-cutting-thrust'.replace('cutting', 'cutting') && 'tech-current-thrust');
++  assert.equal(matchTechniqueText('Azure River Sword', sim.character), 'tech-ripple-parry'); // art named: its cheapest form
++  assert.equal(matchTechniqueText('Nine-Bell Breathing', sim.character), undefined); // not owned
++});
++
++test('a named technique costs its Qi, an unnamed strike costs none, and too little Qi blocks it', () => {
++  const sim = disciple();
++  assert.equal(run(sim, 'Attack the Wandering Swordsman', 60).state.character.qi, sim.character.qi);
++  const named = run(sim, 'Attack the Wandering Swordsman using Ripple Parry', 60);
++  assert.equal(named.state.character.qi, sim.character.qi - 2);
++  assert.ok(named.events.some(e => e.type === 'character.qi_changed' && e.payload.amount === -2));
++  const drained = disciple(); drained.character.qi = 1;
++  assert.equal(run(drained, 'Attack the Wandering Swordsman using Ripple Parry', 60).status, 'blocked');
++});
++
++test('technique mastery requirements are enforced', () => {
++  const sim = disciple(); // Azure River Sword mastery 22; Whirlpool Bind needs 40
++  const locked = run(sim, 'Attack the Wandering Swordsman using Whirlpool Bind', 99);
++  assert.equal(locked.status, 'blocked');
++  assert.match(locked.summary, /not yet mastered Whirlpool Bind/);
++  sim.character.wuxia!.martialArts[0].mastery = 40;
++  assert.notEqual(run(sim, 'Attack the Wandering Swordsman using Whirlpool Bind', 99).status, 'blocked');
++});
++
++test('attacking someone who is not here, or is dead, is blocked rather than silently succeeding', () => {
++  const sim = disciple();
++  assert.equal(run(sim, 'Attack Captain Ma Tie', 99).status, 'blocked'); // at Lantern Ferry
++  npc(sim, 'npc-wandering-swordsman').alive = false;
++  assert.equal(run(sim, 'Attack the Wandering Swordsman', 99).status, 'blocked');
++});
++
++test('a duel has real stakes: winning is free, losing costs HP and a located injury, and rolls order the outcomes', () => {
++  const by = (roll: number) => run(disciple(), 'Challenge the Wandering Swordsman to a friendly duel', roll);
++  const win = by(95); const draw = by(45); const loss = by(5);
++  assert.deepStrictEqual([win.status, draw.status, loss.status], ['success', 'partial', 'failure']);
++  assert.equal(win.state.character.hp, 100);
++  assert.ok(draw.state.character.hp < 100 && draw.state.character.hp > loss.state.character.hp);
++  const injury = loss.events.find(e => e.type === 'character.injury_added')!;
++  assert.ok(['head', 'torso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg', 'internal'].includes(String(injury.payload.bodyRegion)));
++  assert.equal(loss.state.character.wuxia!.injuries.length, 1);
++  assert.deepStrictEqual(validateState(loss.state), []);
++});
++
++test('an honourable bout is gentler than assault: less damage, no grudge, no faction penalty, no bystander anger', () => {
++  const bout = run(disciple(), 'Challenge the Wandering Swordsman to a friendly duel', 5, 'high');
++  const assault = run(disciple(), 'Attack the Wandering Swordsman', 5, 'high');
++  assert.ok(100 - bout.state.character.hp < 100 - assault.state.character.hp);
++  const grudge = (r: typeof bout) => r.state.jianghu!.relationships.find(x => x.subjectId === 'player' && x.targetId === 'npc-wandering-swordsman')?.grudge ?? 0;
++  assert.equal(grudge(bout), 0);
++  assert.equal(grudge(assault), 25);
++  // Faction standing: Captain Ma belongs to the Black River Brotherhood.
++  const ferry = () => createWuxiaSimulation('origin-escort-apprentice');
++  const rep = (r: ReturnType<typeof run>) => r.state.jianghu!.factions.find(f => f.id === 'faction-black-river')!.playerReputation;
++  assert.equal(rep(run(ferry(), 'Challenge Captain Ma Tie to a friendly duel', 60)), 0);
++  assert.equal(rep(run(ferry(), 'Attack Captain Ma Tie', 60)), -10);
++  assert.equal(npc(assault.state, 'npc-wandering-swordsman').disposition, -20, 'generic assault fallout and fight-specific fallout, counted once each');
++  assert.equal(npc(bout.state, 'npc-wandering-swordsman').disposition, -5);
++  assert.ok(npc(assault.state, 'npc-teahouse-keeper').disposition < 0, 'bystander disapproves of violence');
++  assert.equal(npc(bout.state, 'npc-teahouse-keeper').disposition, 0);
++});
++
++test('style counters are felt from both sides, and are symmetric in the authored data', () => {
++  const swordsman = npc(disciple(), 'npc-wandering-swordsman'); // practises Azure River Sword
++  const palm = instantiateArt('art-iron-mountain-palm', 20);
++  const saber = instantiateArt('art-willow-leaf-saber', 20);
++  const sword = instantiateArt('art-azure-river-sword', 20);
++  assert.equal(counterBonus(palm, swordsman), 10);
++  assert.equal(counterBonus(saber, swordsman), -10);
++  assert.equal(counterBonus(sword, swordsman), 0);
++  for (const profile of Object.values(ARTS_BY_ID)) {
++    for (const other of profile.art.strongAgainstArts ?? []) assert.ok(ARTS_BY_ID[other].art.counteredByArts?.includes(profile.art.id) || ARTS_BY_ID[other], `${profile.art.id} > ${other}`);
++    for (const id of [...(profile.art.strongAgainstArts ?? []), ...(profile.art.counteredByArts ?? [])]) assert.ok(ARTS_BY_ID[id], id);
++  }
++  const advantage = run(disciple(), 'Attack the Wandering Swordsman', 60);
++  assert.equal(advantage.events.find(e => e.type === 'character.combat_resolved')!.payload.counter, 'even');
++});
++
++test('injuries matter: arms handicap fighting, legs handicap travel, internal wounds slow Qi recovery, rest heals faster', () => {
++  const sim = disciple(); const c = sim.character;
++  assert.equal(injuryPenalty(c, 'attack'), 0);
++  c.wuxia!.injuries.push({ id: 'a', severity: 2, bodyRegion: 'leftArm', healingTurns: 9, untreated: true });
++  c.wuxia!.injuries.push({ id: 'l', severity: 2, bodyRegion: 'rightLeg', healingTurns: 9, untreated: true });
++  assert.equal(injuryPenalty(c, 'attack'), 4);
++  assert.equal(injuryPenalty(c, 'travel'), 10);
++  const healthy = run(disciple(), 'Travel to Lantern Ferry', 60);
++  const lame = run(sim, 'Travel to Lantern Ferry', 60);
++  assert.equal(lame.difficulty - healthy.difficulty, 10);
++  const base = disciple().character as never;
++  const hurt = disciple().character as never;
++  (hurt as { wuxia: { injuries: unknown[] } }).wuxia.injuries.push({ id: 'i', severity: 3, bodyRegion: 'internal', healingTurns: 9, untreated: true });
++  assert.ok(qiRecovery(hurt, 40) < qiRecovery(base, 40));
++  const resting = disciple(); resting.character.wuxia!.injuries.push({ id: 'w', severity: 1, bodyRegion: 'torso', healingTurns: 10, untreated: true });
++  const after = run(resting, 'Rest', 60).state.character.wuxia!.injuries[0];
++  assert.equal(after.healingTurns, 8); // one extra turn faster than waiting
++});
++
++test('practice raises mastery with diminishing returns, costs Qi, and unlocks locked techniques over time', () => {
++  let sim = disciple();
++  const mastery = () => sim.character.wuxia!.martialArts[0].mastery;
++  const start = mastery();
++  const r = run(sim, 'Practice the Azure River Sword', 60);
++  assert.ok(mastery() === start && r.state.character.wuxia!.martialArts[0].mastery > start);
++  assert.equal(masteryGain('success', 0, true), 3);
++  assert.equal(masteryGain('success', 40, true), 2);
++  assert.equal(masteryGain('success', 90, true), 1);
++  assert.equal(masteryGain('failure', 0, true), 0);
++  for (let i = 0; i < 40; i++) {
++    sim.character.fatigue = 0; sim.character.qi = sim.character.maxQi;
++    sim = run(sim, 'Practice the Azure River Sword', 60).state;
++    assert.deepStrictEqual(validateState(sim), []);
++  }
++  assert.ok(mastery() >= 40, `mastery ${mastery()}`);
++  assert.notEqual(run(sim, 'Attack the Wandering Swordsman using Whirlpool Bind', 60).status, 'blocked');
++  assert.equal(run(createWuxiaSimulation('origin-wandering-physician'), 'Practice the Heart-Sutra Healing Touch', 60).status, 'success');
++});
++
++test('beating someone far weaker teaches nothing: no mastery farming on bystanders', () => {
++  const r = run(disciple(), 'Attack Old Tea Keeper', 99);
++  assert.equal(r.status, 'success');
++  assert.ok(!r.events.some(e => e.type === 'character.mastery_changed'));
++});
++
++test('defeat creates a new situation: mercy, robbery, detention, and death only when the circumstances justify it', () => {
++  const j = disciple().jianghu!;
++  const foe = (id: string) => j.npcs.find(n => n.id === id)!;
++  const args = (id: string, over: Partial<Parameters<typeof chooseDefeat>[0]> = {}) => ({ jianghu: j, opponent: foe(id), honourable: false, risk: 'medium' as RiskLevel, margin: 10, ...over });
++  assert.equal(chooseDefeat(args('npc-gu-wen', { honourable: true })), 'mercy');
++  assert.equal(chooseDefeat(args('npc-abbot-huiyuan', { risk: 'high', margin: 99 })), 'mercy'); // monks never kill
++  assert.equal(chooseDefeat(args('npc-yun-shuang')), 'mercy');
++  assert.equal(chooseDefeat(args('npc-zhao-rong')), 'detained'); // garrison
++  assert.equal(chooseDefeat(args('npc-ma-tie')), 'robbed');
++  assert.equal(chooseDefeat(args('npc-bai-qingshan', { risk: 'high', margin: 40 })), 'killed');
++  assert.equal(chooseDefeat(args('npc-bai-qingshan', { risk: 'high', margin: 10 })), 'robbed');
++  assert.equal(chooseDefeat(args('npc-bai-qingshan', { risk: 'medium', margin: 99 })), 'robbed');
++});
++
++test('being beaten at low HP plays out end to end: robbed, left alive, Face lost; a bout never takes your things', () => {
++  const sim = disciple(); sim.character.hp = 8; sim.character.inventory = ['plain sword', 'expulsion token', 'copper coins'];
++  const robbed = run(sim, 'Attack the Wandering Swordsman', 5);
++  assert.equal(robbed.state.character.hp, 15);
++  assert.deepStrictEqual(robbed.state.character.inventory, ['plain sword']);
++  const defeat = robbed.events.find(e => e.type === 'character.defeated')!;
++  assert.equal(defeat.payload.outcome, 'robbed');
++  assert.ok(robbed.state.character.wuxia!.social.face < sim.character.wuxia!.social.face);
++  assert.deepStrictEqual(validateState(robbed.state), []);
++
++  const bout = disciple(); bout.character.hp = 8; bout.character.inventory = ['plain sword', 'copper coins'];
++  const spared = run(bout, 'Challenge the Wandering Swordsman to a friendly duel', 5);
++  assert.equal(spared.events.find(e => e.type === 'character.defeated')!.payload.outcome, 'mercy');
++  assert.deepStrictEqual(spared.state.character.inventory, ['plain sword', 'copper coins']);
++  assert.ok(spared.state.character.hp >= 1);
++});
++
++test('death is possible and final, and is clearly caused: reckless lethal assault on a master at low HP', () => {
++  const sim = disciple();
++  const bai = npc(sim, 'npc-bai-qingshan'); bai.locationId = sim.character.locationId;
++  sim.character.hp = 5;
++  const r = run(sim, 'Attack Elder Bai Qingshan', 1, 'high');
++  assert.equal(r.events.find(e => e.type === 'character.defeated')?.payload.outcome, 'killed');
++  assert.equal(r.state.character.hp, 0);
++  assert.deepStrictEqual(validateState(r.state), []);
++});
++
++test('nothing in a monastery kills you: attacking the abbot at any risk ends in mercy', () => {
++  const sim = disciple(); sim.character.hp = 3;
++  const abbot = npc(sim, 'npc-abbot-huiyuan'); abbot.locationId = sim.character.locationId;
++  const r = run(sim, 'Attack Abbot Huiyuan', 1, 'high');
++  assert.equal(r.events.find(e => e.type === 'character.defeated')?.payload.outcome, 'mercy');
++  assert.ok(r.state.character.hp > 0);
++});
++
++test('opponent power: authored where it matters, bounded and derived otherwise', () => {
++  for (const p of NPC_PROFILES) { const power = opponentPower(p.npc); assert.ok(power >= 5 && power <= 95, p.npc.id); }
++  assert.ok(opponentPower(npc(disciple(), 'npc-bai-qingshan')) > opponentPower(npc(disciple(), 'npc-ma-tie')));
++  const plain = { ...npc(disciple(), 'npc-ma-tie'), power: undefined, resources: 40, skills: ['a', 'b'] };
++  assert.equal(opponentPower(plain), 36);
++});
++
++test('the narrator and the fallback narrator both report the fight, the wound and the outcome, and never the opponent\'s power or secrets', () => {
++  const secrets = NPC_PROFILES.flatMap(p => [...p.npc.secrets, ...p.npc.goals.map(g => g.description)]);
++  const sim = disciple(); sim.character.hp = 8; sim.character.inventory = ['plain sword', 'copper coins'];
++  const lost = run(sim, 'Attack the Wandering Swordsman', 5);
++  const digest = buildNarratorDigest(lost, options); assert.ok(/injury to your (head|torso|left arm|right arm|left leg|right leg|inner organs)/.test(digest), digest); const plain = fallbackNarration(lost, options);
++  for (const text of [digest, plain]) {
++    assert.ok(/(gets|got) the better of you/.test(text), text);
++    assert.ok(/strips you of/.test(text), text);
++    for (const s of secrets) assert.ok(!text.includes(s));
++  }
++  assert.ok(!/power/i.test(digest.split('\n').slice(1).join('\n')));
++  const won = run(disciple(), 'Challenge the Wandering Swordsman to a friendly duel', 95);
++  assert.ok(buildNarratorDigest(won, options).includes('You bested Wandering Swordsman in a bout.'));
++  assert.ok(buildNarratorDigest(won, options).includes('feels sharper'));
++});
++
++test('every origin x every NPC x risk x roll: a fight always leaves a valid, replayable world', () => {
++  let checked = 0;
++  for (const origin of ['origin-disgraced-disciple', 'origin-escort-apprentice', 'origin-frontier-deserter', 'origin-wandering-physician']) {
++    for (const p of NPC_PROFILES) {
++      for (const risk of ['low', 'medium', 'high'] as RiskLevel[]) {
++        for (const roll of [0, 30, 60, 99]) {
++          const sim = createWuxiaSimulation(origin);
++          npc(sim, p.npc.id).locationId = sim.character.locationId;
++          sim.character.hp = [100, 30, 5][roll % 3];
++          const before = JSON.stringify(sim);
++          const text = roll % 2 ? `Attack ${p.npc.name}` : `Challenge ${p.npc.name} to a friendly duel`;
++          const r = run(sim, text, roll, risk);
++          assert.equal(JSON.stringify(sim), before, 'input mutated');
++          assert.deepStrictEqual(validateState(r.state), [], `${origin}/${p.npc.id}/${risk}/${roll}`);
++          assert.ok(r.state.character.hp >= 0 && r.state.character.hp <= r.state.character.maxHp);
++          assert.ok(r.state.character.qi >= 0);
++          assert.equal(JSON.stringify(run(sim, text, roll, risk).state), JSON.stringify(r.state), 'not deterministic');
++          checked++;
++        }
++      }
++    }
++  }
++  assert.ok(checked >= 500);
++});

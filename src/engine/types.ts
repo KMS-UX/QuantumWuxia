@@ -12,6 +12,7 @@ export type ActionKind =
   | 'attack'
   | 'meditate'
   | 'rest'
+  | 'train'
   | 'other';
 
 export type RiskLevel = 'low' | 'medium' | 'high';
@@ -104,6 +105,9 @@ export interface StateEvent {
     | 'character.qi_changed'
     | 'character.fatigue_changed'
     | 'character.injury_added'
+    | 'character.mastery_changed'
+    | 'character.combat_resolved'
+    | 'character.defeated'
     | 'character.social_changed'
     | 'world.location_changed'
     | 'world.fact_discovered'

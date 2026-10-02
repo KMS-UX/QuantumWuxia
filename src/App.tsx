@@ -182,6 +182,7 @@ export default function App() {
           level={currentGameState.character.level}
           turnsSurvived={currentGameState.turnCount}
           hasSaves={saveSlots.length > 0}
+          allowContinue={!currentGameState.character.originId}
           onRespawn={(option) => {
             if (option === 'continue') {
               revive();

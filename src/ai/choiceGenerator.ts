@@ -58,6 +58,14 @@ export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}
   if (roads[0]) add(`Travel to ${roads[0].id}`, risk(roads[0].days), 'travel');
 
   // 5. More of the above, then looking after yourself.
+  const arts = state.character.wuxia?.martialArts ?? [];
+  const rested = state.character.fatigue < 60;
+  const trainable = [...arts].sort((a, b) => a.mastery - b.mastery || a.id.localeCompare(b.id))[0];
+  if (trainable && trainable.mastery < 100 && rested) add(`Practice the ${trainable.name}`, 'low', 'train');
+  const fit = state.character.hp >= state.character.maxHp * 0.6 && rested;
+  // A fair bout: someone who fights, but not a healer, and not so far above the player that it is a death wish.
+  const sparring = people.find(p => (p.arts?.length ?? 0) > 0 && (p.power ?? 0) >= 30 && (p.power ?? 0) <= 70 && !/healer|physician|abbot/i.test(p.role));
+  if (sparring && arts.length && fit) add(`Challenge ${sparring.name} to a friendly duel`, 'medium', 'attack');
   if (people[1]) add(`Talk to ${people[1].name}`, 'low', 'talk');
   if (roads[1]) add(`Travel to ${roads[1].id}`, risk(roads[1].days), 'travel');
   if (features.length > 1) add(`Inspect the ${features[(state.world.turn + 1) % features.length]}`, 'low', 'inspect');

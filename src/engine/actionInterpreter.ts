@@ -1,3 +1,4 @@
+import { matchTechniqueText } from './combat';
 import type { ProposedAction, RiskLevel, SimulationState } from './types';
 
 const KEYWORDS: Array<[ProposedAction['kind'], string[]]> = [
@@ -7,6 +8,7 @@ const KEYWORDS: Array<[ProposedAction['kind'], string[]]> = [
   ['meditate', ['meditate', 'cultivate', 'focus qi', 'circulate qi', 'breathe']],
   ['rest', ['rest', 'sleep', 'wait quietly', 'recover', 'catch my breath']],
   ['talk', ['talk', 'speak', 'ask ', 'question', 'negotiate', 'call out', 'persuade']],
+  ['train', ['train', 'practice', 'practise', 'drill', 'rehearse', 'hone ']],
   ['inspect', ['inspect', 'examine', 'search', 'look ', 'read ', 'listen', 'study', 'investigate']],
 ];
 
@@ -35,9 +37,22 @@ function inferApproach(text: string): string | undefined {
   return approaches.find(([keyword]) => text.includes(keyword))?.[1];
 }
 
-function inferTechnique(text: string): string | undefined {
-  const match = text.match(/(?:use|with|using)\s+([a-z0-9_-]+(?:\s+[a-z0-9_-]+){0,2})/i);
-  return match?.[1]?.trim();
+/**
+ * Resolve a technique the player names to a technique they actually own. Free text that names
+ * nothing they know ("with my sword") is dropped rather than passed on, so a casual phrase can
+ * never make an otherwise legal action fail validation.
+ */
+function inferTechnique(text: string, simulation: SimulationState): string | undefined {
+  const phrases = [
+    text.match(/(?:use|with|using)\s+(?:the\s+|my\s+)?([a-z0-9_:-]+(?:\s+[a-z0-9_:-]+){0,3})/i)?.[1],
+    text.match(/(?:practi[sc]e|drill|rehearse|hone|train)\s+(?:the\s+|my\s+)?([a-z0-9_:-]+(?:\s+[a-z0-9_:-]+){0,3})/i)?.[1],
+    text,
+  ];
+  for (const phrase of phrases) {
+    const id = phrase ? matchTechniqueText(phrase, simulation.character) : undefined;
+    if (id) return id;
+  }
+  return undefined;
 }
 
 function inferGoal(text: string, simulation: SimulationState): string | undefined {
@@ -87,7 +102,7 @@ export function interpretPlayerAction(
     ? inferTarget(lower, simulation)
     : undefined;
   const approach = inferApproach(lower);
-  const techniqueId = kind === 'attack' || kind === 'meditate' ? inferTechnique(lower) : undefined;
+  const techniqueId = kind === 'attack' || kind === 'meditate' || kind === 'train' ? inferTechnique(lower, simulation) : undefined;
   const intendedGoal = inferGoal(normalized, simulation);
   const conditionalClauses = inferConditionalClauses(lower);
   const declaredConstraints = inferDeclaredConstraints(lower);

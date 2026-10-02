@@ -164,6 +164,32 @@ export const MARTIAL_ARTS: MartialArtProfile[] = [
   },
 ];
 
+/**
+ * Structured style relationships (the prose `strongAgainst` / `counteredBy` above is flavour for
+ * the narrator; these ids are what the combat rules read). Authored in pairs so a counter is
+ * felt from both sides.
+ */
+const STYLE_EDGES: Record<string, { strongAgainst: string[]; counteredBy: string[] }> = {
+  'art-azure-river-sword': { strongAgainst: ['art-willow-leaf-saber'], counteredBy: ['art-iron-mountain-palm'] },
+  'art-iron-mountain-palm': { strongAgainst: ['art-azure-river-sword', 'art-willow-leaf-saber', 'art-frostbell-spear'], counteredBy: ['art-swallow-skimming-steps', 'art-crimson-lotus-needles'] },
+  'art-crimson-lotus-needles': { strongAgainst: ['art-iron-mountain-palm'], counteredBy: ['art-nine-bell-breathing'] },
+  'art-nine-bell-breathing': { strongAgainst: ['art-crimson-lotus-needles', 'art-foxfire-steps'], counteredBy: [] },
+  'art-willow-leaf-saber': { strongAgainst: [], counteredBy: ['art-azure-river-sword', 'art-iron-mountain-palm', 'art-frostbell-spear'] },
+  'art-frostbell-spear': { strongAgainst: ['art-willow-leaf-saber'], counteredBy: ['art-iron-mountain-palm'] },
+  'art-swallow-skimming-steps': { strongAgainst: ['art-iron-mountain-palm'], counteredBy: [] },
+  'art-foxfire-steps': { strongAgainst: [], counteredBy: ['art-nine-bell-breathing'] },
+};
+/** Parent-art mastery a technique needs before it can be used (enforced by the resolver). */
+const TECHNIQUE_REQUIREMENTS: Record<string, number> = {
+  'tech-whirlpool-bind': 40, 'tech-ninth-bell': 50, 'tech-lantern-veil': 30,
+  'tech-rockfall-strike': 25, 'tech-icefall-thrust': 30, 'tech-meridian-push': 30, 'tech-lotus-sting': 25,
+};
+for (const profile of MARTIAL_ARTS) {
+  const edges = STYLE_EDGES[profile.art.id];
+  if (edges) { profile.art.strongAgainstArts = edges.strongAgainst; profile.art.counteredByArts = edges.counteredBy; }
+  for (const t of profile.art.techniques) if (TECHNIQUE_REQUIREMENTS[t.id] !== undefined) t.minMastery = TECHNIQUE_REQUIREMENTS[t.id];
+}
+
 export const ARTS_BY_ID: Record<string, MartialArtProfile> = Object.fromEntries(
   MARTIAL_ARTS.map(profile => [profile.art.id, profile]),
 );
@@ -181,6 +207,8 @@ export function instantiateArt(id: string, mastery = 0): MartialArt {
     ...profile.art,
     mastery: clamped,
     techniques: profile.art.techniques.map(t => ({ ...t, mastery: Math.floor(clamped / 2) })),
+    strongAgainstArts: profile.art.strongAgainstArts ? [...profile.art.strongAgainstArts] : undefined,
+    counteredByArts: profile.art.counteredByArts ? [...profile.art.counteredByArts] : undefined,
     compatibleArts: profile.art.compatibleArts ? [...profile.art.compatibleArts] : undefined,
     incompatibleArts: profile.art.incompatibleArts ? [...profile.art.incompatibleArts] : undefined,
     weaknesses: profile.art.weaknesses ? [...profile.art.weaknesses] : undefined,

@@ -28,5 +28,7 @@ export function qiRecovery(character: WuxiaSimulationState, baseAmount: number):
   const control = character.wuxia.cultivation.qiControl / 100;
   const meridian = character.wuxia.cultivation.meridianIntegrity / 100;
   const fatiguePenalty = Math.max(0.25, 1 - character.fatigue / 150);
-  return Math.max(1, Math.floor(baseAmount * control * meridian * fatiguePenalty));
+  const internal = character.wuxia.injuries.filter(i => i.bodyRegion === 'internal').reduce((sum, i) => sum + i.severity, 0);
+  const internalPenalty = Math.max(0.25, 1 - internal * 0.15);
+  return Math.max(1, Math.floor(baseAmount * control * meridian * fatiguePenalty * internalPenalty));
 }

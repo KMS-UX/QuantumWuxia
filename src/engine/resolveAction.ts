@@ -7,6 +7,7 @@ import type {
 } from './types';
 import { validateState } from './validateState';
 import { qiRecovery } from './wuxiaRules';
+import { applyDuel, applyMastery, bestCombatArt, duelDifficulty, findTechnique, combatEdge, injuryPenalty, masteryGain, techniqueLocked, type ArtUse } from './combat';
 import { syncInjuries } from './wuxia';
 import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
 import { applyCausalityV3 } from './jianghuCausalityV3';
@@ -23,6 +24,7 @@ const DIFFICULTY: Record<ProposedAction['kind'], number> = {
   attack: 50,
   meditate: 40,
   rest: 20,
+  train: 30,
   other: 45,
 };
 
@@ -119,8 +121,30 @@ export function resolveAction(
     return entries;
   };
   const c = state.character;
-  const qiCost = normalizedAction.qiCost ?? (normalizedAction.kind === 'attack' ? 0 : normalizedAction.kind === 'meditate' ? 0 : 0);
-  const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' ? 2 : normalizedAction.kind === 'travel' ? 2 : 1);
+  // A named technique costs its Qi; plain strikes, talk and travel cost none.
+  const named: ArtUse | undefined = findTechnique(c, normalizedAction.techniqueId);
+  const qiCost = normalizedAction.qiCost ?? named?.technique?.qiCost ?? 0;
+  const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' || normalizedAction.kind === 'travel' || normalizedAction.kind === 'train' ? 2 : 1);
+  const blockedNow = (summary: string, difficulty: number): ActionResolution => ({
+    status: 'blocked', summary, action: normalizedAction, state,
+    events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
+    ledger: persistLedger('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
+    roll, difficulty,
+  });
+
+  const duelTarget = normalizedAction.kind === 'attack' && normalizedAction.targetId
+    ? state.jianghu?.npcs.find(n => n.id === normalizedAction.targetId)
+    : undefined;
+  if (duelTarget && (!duelTarget.alive || duelTarget.locationId !== c.locationId)) {
+    return blockedNow('No one by that name is here to fight.', DIFFICULTY.attack);
+  }
+  const practiceUse: ArtUse | undefined = normalizedAction.kind === 'train'
+    ? (named ?? (bestCombatArt(c) ? { art: bestCombatArt(c)! } : c.wuxia?.martialArts[0] ? { art: c.wuxia.martialArts[0] } : undefined))
+    : undefined;
+  if (normalizedAction.kind === 'train' && !practiceUse) return blockedNow('You know no martial art to practise.', DIFFICULTY.train);
+  if (named?.technique && techniqueLocked(named.art, named.technique)) {
+    return blockedNow(`You have not yet mastered ${named.technique.name}; it needs ${named.technique.minMastery} mastery of ${named.art.name}.`, DIFFICULTY[normalizedAction.kind]);
+  }
 
   if (normalizedAction.kind === 'travel') {
     if (!normalizedAction.destinationId || !state.world.locationIds.includes(normalizedAction.destinationId)) {
@@ -149,8 +173,14 @@ export function resolveAction(
     };
   }
 
-  const difficulty = clamp(DIFFICULTY[normalizedAction.kind] + RISK_MODIFIER[normalizedAction.riskPosture ?? normalizedAction.risk] - Math.floor(c.attributes.luck / 5), 5, 95);
-  const score = roll + Math.floor((c.attributes.perception + c.attributes.agility) / 4);
+  const attackUse: ArtUse | undefined = named ?? (normalizedAction.kind === 'attack' && bestCombatArt(c) ? { art: bestCombatArt(c)! } : undefined);
+  let difficulty = clamp(DIFFICULTY[normalizedAction.kind] + RISK_MODIFIER[normalizedAction.riskPosture ?? normalizedAction.risk] - Math.floor(c.attributes.luck / 5), 5, 95)
+    + injuryPenalty(c, normalizedAction.kind);
+  let score = roll + Math.floor((c.attributes.perception + c.attributes.agility) / 4);
+  if (duelTarget) {
+    difficulty = duelDifficulty(duelTarget, normalizedAction.riskPosture ?? normalizedAction.risk, c.attributes.luck);
+    score = roll + combatEdge(c, attackUse, duelTarget);
+  }
   let status: ActionResolution['status'];
 
   if (normalizedAction.kind === 'rest') {
@@ -160,6 +190,8 @@ export function resolveAction(
     c.hp += restoredHp;
     events.push({ type: 'character.hp_changed', causes: ['action:rest'], payload: { amount: restoredHp, reason: 'rest' } });
     events.push({ type: 'character.fatigue_changed', causes: ['action:rest'], payload: { value: c.fatigue } });
+    // Rest is how wounds close faster (Bible section 7: recovery).
+    if (c.wuxia) c.wuxia.injuries = c.wuxia.injuries.map(i => ({ ...i, healingTurns: Math.max(1, i.healingTurns - 1) }));
   } else if (normalizedAction.kind === 'meditate') {
     status = 'success';
     const restoredQi = Math.min(
@@ -182,7 +214,7 @@ export function resolveAction(
     status = 'failure';
   }
 
-  if (status === 'failure' && normalizedAction.kind === 'attack' && normalizedAction.risk === 'high' && c.wuxia) {
+  if (status === 'failure' && normalizedAction.kind === 'attack' && normalizedAction.risk === 'high' && c.wuxia && !duelTarget) {
     const injury = {
       id: `backlash-${state.world.turn + 1}`,
       severity: 1,
@@ -209,9 +241,20 @@ export function resolveAction(
     });
   }
 
-  if (normalizedAction.kind !== 'rest' && normalizedAction.kind !== 'meditate') {
+  if (duelTarget && state.jianghu && (status === 'success' || status === 'partial' || status === 'failure')) {
+    // Qi is spent first so a defeat reads the post-exchange state.
     c.qi -= qiCost;
-    if (qiCost > 0) events.push({ type: 'character.qi_changed', causes: [`action:${normalizedAction.kind}`, 'resource:qi'], payload: { amount: -qiCost, reason: normalizedAction.kind } });
+    applyDuel({ state, c, opponent: duelTarget, status, roll, score, difficulty, use: attackUse, action: normalizedAction, qiSpent: qiCost }, events);
+    if (qiCost > 0) events.push({ type: 'character.qi_changed', causes: ['action:attack', 'resource:qi'], payload: { amount: -qiCost, reason: 'technique' } });
+  } else if (normalizedAction.kind === 'train' && practiceUse) {
+    c.qi -= qiCost;
+    if (qiCost > 0) events.push({ type: 'character.qi_changed', causes: ['action:train', 'resource:qi'], payload: { amount: -qiCost, reason: 'practice' } });
+    applyMastery(c, practiceUse, masteryGain(status, practiceUse.art.mastery, true), events);
+  }
+
+  if (normalizedAction.kind !== 'rest' && normalizedAction.kind !== 'meditate') {
+    if (!duelTarget && normalizedAction.kind !== 'train') c.qi -= qiCost;
+    if (qiCost > 0 && !duelTarget && normalizedAction.kind !== 'train') events.push({ type: 'character.qi_changed', causes: [`action:${normalizedAction.kind}`, 'resource:qi'], payload: { amount: -qiCost, reason: normalizedAction.kind } });
     if (status === 'success' && normalizedAction.kind === 'travel' && normalizedAction.destinationId) {
       const from = c.locationId;
       c.locationId = normalizedAction.destinationId;

@@ -16,8 +16,15 @@ Candidate Bible §18 entries from the v2-v5 work. Each says what changed, why, a
 | D10 | The narrator's choices are filtered to what the rules can honour and backfilled by a deterministic generator. | Bible §13 choice-generator contract. | `choiceGenerator.ts` |
 | D11 | Rolls come from a saved seed and draw counter (`world.rng`); roll N = f(seed, N). Older saves get a seed on their first action. | Bible §4: reproducible bug reports. | `rng.ts`, `actionPipeline.ts`, `validateState` |
 
+| D12 | Technique text the player types is resolved to an owned technique id or dropped; it can no longer fail validation. | Any "with/using X" phrase threw and lost the turn. | `actionInterpreter.ts`, `combat.ts` |
+| D13 | Named techniques cost Qi and need `minMastery` on the parent art; unnamed strikes cost none. New `train` action raises mastery with diminishing returns. | Bible §6: arts are learned disciplines with requirements and advancement; Qi was never spent. | resolver, interpreter, content |
+| D14 | Attacks on people are a single deterministic exchange scored from opponent power, player edge and style counters, with HP loss, located injuries, and social fallout. A friendly bout ("duel / spar / challenge") is non-lethal and skips the assault penalties. | Bible §6-8, and "duels" are named in §3. | `combat.ts`, `jianghu.ts` |
+| D15 | Defeat resolves as mercy, robbery, detention or death by fixed rules; death needs a lethal, high-risk attack on a master (power 70+) with a large margin, and never happens at a monastery. Origin characters cannot revive. | Bible §7: new situations, no automatic revive. | `chooseDefeat`, store, DeathScreen |
+| D16 | Injuries have mechanical effects by region (arms: fighting; legs: travel and stealth; internal: Qi recovery); rest speeds healing. | Bible §7 examples. | `combat.ts`, `wuxiaRules.ts`, resolver |
+
 ## Open decisions (not made)
 - **V5 causal branching is never reached in live play** (V4 sets the shared timer first). Activating it changes outcomes: its default branch for low-severity faction events is "de-escalate", which would end disputes early. Recommendation: do not activate until finales cover the branches it would otherwise decide.
 - **Time model** (hour/date/season/weather, travel duration from the weighted map): Bible §11, absent.
 - **Defeat model** to replace `revive()`: capture, ransom, forced debt, scar, per Bible §7.
-- **Resolver depth**: techniques, Qi cost, mastery and counters.
+- **Multi-round combat with NPC HP**, NPC-vs-NPC fights, capture-and-ransom and forced-debt storylines, poison and untreated-wound consequences.
+- **Teachers**: learning an art from an NPC (requirements, trust, price).

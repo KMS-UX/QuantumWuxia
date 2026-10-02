@@ -1,4 +1,5 @@
 import type { ProposedAction, SimulationState, StateEvent } from './types';
+import { isHonourableBout } from './bout';
 import type { FinaleSpec } from './finale';
 
 export type MemoryValence = 'positive' | 'negative' | 'neutral';
@@ -38,6 +39,10 @@ export interface NPCState {
   resources: number;
   memories: NPCMemory[];
   alive: boolean;
+  /** Combat strength 0..100; when absent it is derived from resources and skills. */
+  power?: number;
+  /** Martial art ids this NPC practises (used for counters). */
+  arts?: string[];
 }
 
 export interface FactionState {
@@ -301,7 +306,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function upsertRelationship(
+export function upsertRelationship(
   relationships: RelationshipState[],
   subjectId: string,
   targetId: string,
@@ -367,7 +372,8 @@ export function applyJianghuAction(
     }
   }
 
-  if (action.kind === 'attack' && action.targetId) {
+  // A friendly bout is not an assault: combat.ts applies its own, gentler consequences.
+  if (action.kind === 'attack' && action.targetId && !isHonourableBout(action.description)) {
     const npc = jianghu.npcs.find(n => n.id === action.targetId);
     if (npc && npc.alive) {
       const relationship = upsertRelationship(jianghu.relationships, simulation.character.id, npc.id, turn);

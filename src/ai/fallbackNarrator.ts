@@ -1,3 +1,4 @@
+import { regionName } from '../engine/bout';
 import type { ActionResolution, ResolutionStatus, StateEvent } from '../engine/types';
 
 export interface FallbackNarratorOptions {
@@ -41,8 +42,17 @@ export function fallbackNarration(resolution: ActionResolution, options: Fallbac
       else if (fact) parts.push(`You learn something, though you cannot yet be sure of it: ${fact}`);
     } else if (e.type === 'world.finale_resolved' && witnessed(e)) {
       parts.push(`${str(e.payload.headline) ?? ''} ${str(e.payload.description) ?? ''}`.trim());
+    } else if (e.type === 'character.combat_resolved') {
+      const foe = npcName(str(e.payload.opponentId));
+      parts.push(e.payload.outcome === 'won' ? `You bested ${foe}.` : e.payload.outcome === 'drew' ? `You and ${foe} fight to a bloody standstill.` : `${foe} gets the better of you.`);
+    } else if (e.type === 'character.defeated') {
+      const foe = npcName(str(e.payload.opponentId));
+      const out = String(e.payload.outcome);
+      parts.push(out === 'mercy' ? `${foe} spares you and lets you go.` : out === 'robbed' ? `${foe} strips you of your belongings and leaves you behind.` : out === 'detained' ? `${foe}'s people seize you and take everything you carry.` : `${foe}'s final blow lands, and you do not rise.`);
+    } else if (e.type === 'character.mastery_changed') {
+      parts.push(`Your ${str(e.payload.artName)} feels sharper than before.`);
     } else if (e.type === 'character.injury_added') {
-      parts.push(`You are hurt: a minor ${str(e.payload.bodyRegion) ?? 'physical'} injury.`);
+      parts.push(`You are hurt: a ${(typeof e.payload.severity === 'number' && e.payload.severity >= 3) ? 'serious' : 'minor'} injury to your ${regionName(str(e.payload.bodyRegion))}.`);
     }
   }
 

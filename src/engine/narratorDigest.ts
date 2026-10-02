@@ -1,3 +1,4 @@
+import { regionName } from './bout';
 import { chainPace } from './jianghu';
 import type { ActionResolution, StateEvent } from './types';
 
@@ -59,6 +60,29 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
         }
         break;
       }
+      case 'character.combat_resolved': {
+        const foe = npcName(str(e.payload.opponentId));
+        const how = e.payload.honourable === true ? 'in a bout' : 'in a fight';
+        const verdict = e.payload.outcome === 'won' ? `You bested ${foe} ${how}.` : e.payload.outcome === 'drew' ? `You and ${foe} fought to a bloody standstill ${how}.` : `${foe} got the better of you ${how}.`;
+        const edge = e.payload.counter === 'advantage' ? ' Your style had the upper hand against theirs.' : e.payload.counter === 'disadvantage' ? ' Their style gave them the upper hand against yours.' : '';
+        happened.push(`${verdict}${edge}`);
+        break;
+      }
+      case 'character.defeated': {
+        const foe = npcName(str(e.payload.opponentId));
+        const lost = num(e.payload.itemsLost) ?? 0;
+        const text: Record<string, string> = {
+          mercy: `${foe} spares you and lets you go, battered but alive.`,
+          robbed: `${foe} strips you of ${lost} possession${lost === 1 ? '' : 's'} and leaves you in the dust.`,
+          detained: `${foe}'s people seize you and confiscate everything you carry.`,
+          killed: `${foe}'s final blow lands, and you do not rise.`,
+        };
+        happened.push(text[String(e.payload.outcome)] ?? 'You are defeated.');
+        break;
+      }
+      case 'character.mastery_changed':
+        happened.push(`Your ${str(e.payload.artName)} feels sharper than before.`);
+        break;
       case 'world.finale_resolved':
         if (witnessed(e)) happened.push(`A decisive moment unfolded before you: ${str(e.payload.headline)} ${str(e.payload.description) ?? ''}`.trim());
         break;
@@ -66,7 +90,7 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
         if (witnessed(e) && action.kind === 'talk') happened.push(`The conversation went well; ${npcName(action.targetId)} warmed to you slightly.`);
         break;
       case 'character.injury_added':
-        happened.push(`You suffered a minor ${str(e.payload.bodyRegion) ?? 'physical'} injury.`);
+        happened.push(`You suffered a ${(num(e.payload.severity) ?? 1) >= 3 ? 'serious' : 'minor'} injury to your ${regionName(str(e.payload.bodyRegion))}.`);
         break;
       case 'character.hp_changed':
         if ((num(e.payload.amount) ?? 0) < 0) happened.push(`You lost ${Math.abs(num(e.payload.amount) ?? 0)} HP.`);

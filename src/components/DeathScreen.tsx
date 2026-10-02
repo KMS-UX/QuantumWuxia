@@ -7,9 +7,11 @@ interface DeathScreenProps {
   turnsSurvived: number;
   onRespawn: (option: 'continue' | 'loadSave' | 'newGame') => void;
   hasSaves: boolean;
+  /** False for Wuxia origin characters: death is final; defeat is handled by the simulation (Bible section 7). */
+  allowContinue?: boolean;
 }
 
-export default function DeathScreen({ characterName, level, turnsSurvived, onRespawn, hasSaves }: DeathScreenProps) {
+export default function DeathScreen({ characterName, level, turnsSurvived, onRespawn, hasSaves, allowContinue = true }: DeathScreenProps) {
   const [showOptions, setShowOptions] = useState(false);
 
   const deathQuotes = [
@@ -77,13 +79,15 @@ export default function DeathScreen({ characterName, level, turnsSurvived, onRes
           </button>
         ) : (
           <div className="space-y-3 animate-fade-in">
-            <button
-              onClick={() => onRespawn('continue')}
-              className="w-full bg-gradient-to-r from-green-700 to-green-600 hover:from-green-600 hover:to-green-500 text-white font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2"
-            >
-              <Heart className="w-5 h-5" />
-              Revive (Lose 50% Gold)
-            </button>
+            {allowContinue && (
+              <button
+                onClick={() => onRespawn('continue')}
+                className="w-full bg-gradient-to-r from-green-700 to-green-600 hover:from-green-600 hover:to-green-500 text-white font-bold py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2"
+              >
+                <Heart className="w-5 h-5" />
+                Revive (Lose 50% Gold)
+              </button>
+            )}
             
             {hasSaves && (
               <button

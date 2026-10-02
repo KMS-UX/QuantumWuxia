@@ -28,6 +28,8 @@ export interface MartialTechnique {
   description: string;
   qiCost: number;
   mastery: number; // 0..100
+  /** The parent art's mastery needed before this technique can be used. */
+  minMastery?: number;
 }
 
 export interface MartialArt {
@@ -41,6 +43,9 @@ export interface MartialArt {
   compatibleArts?: string[];
   incompatibleArts?: string[];
   weaknesses?: string[];
+  /** Art ids this art has the upper hand against / that have the upper hand against it. */
+  strongAgainstArts?: string[];
+  counteredByArts?: string[];
 }
 
 export interface CultivationState {

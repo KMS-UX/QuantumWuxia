@@ -22,6 +22,22 @@ const goal = (id: string, kind: NPCState['goals'][number]['kind'], description: 
 const npc = (partial: Omit<NPCState, 'disposition' | 'memories' | 'alive'> & { disposition?: number }): NPCState =>
   ({ disposition: 0, memories: [], alive: true, ...partial });
 
+/** Combat strength (0-100) and practised arts for NPCs who can fight; everyone else derives a modest default. */
+const COMBAT: Record<string, { power: number; arts: string[] }> = {
+  'npc-teahouse-keeper': { power: 10, arts: [] },
+  'npc-wandering-swordsman': { power: 62, arts: ['art-azure-river-sword'] },
+  'npc-yun-shuang': { power: 20, arts: ['art-heart-sutra-touch'] },
+  'npc-bai-qingshan': { power: 85, arts: ['art-azure-river-sword', 'art-nine-bell-breathing'] },
+  'npc-gu-wen': { power: 66, arts: ['art-azure-river-sword'] },
+  'npc-ma-tie': { power: 42, arts: [] },
+  'npc-abbot-huiyuan': { power: 80, arts: ['art-nine-bell-breathing', 'art-heart-sutra-touch'] },
+  'npc-lian-xiaoyue': { power: 55, arts: ['art-crimson-lotus-needles'] },
+  'npc-zhao-rong': { power: 60, arts: ['art-frostbell-spear', 'art-iron-mountain-palm'] },
+  'npc-ah-lin': { power: 14, arts: [] },
+  'npc-su-mian': { power: 48, arts: ['art-foxfire-steps'] },
+  'npc-archivist-mo': { power: 92, arts: [] },
+};
+
 export const FACTIONS: FactionState[] = [
   { id: 'faction-jade-hall', name: 'Jade Hall', type: 'sect',
     description: 'An orthodox sword sect that prizes reputation, sworn oaths, and the Azure River Sword. Its aging master has not named an heir.',
@@ -141,6 +157,11 @@ export const NPC_PROFILES: NpcProfile[] = [
       secrets: ['Has kept the archive for far longer than a human lifetime.', 'The poison codex is real, and he knows what it costs to read it.'],
       skills: ['scholarship', 'languages', 'ancient arts'], resources: 15 }) },
 ];
+
+for (const profile of NPC_PROFILES) {
+  const combat = COMBAT[profile.npc.id];
+  if (combat) { profile.npc.power = combat.power; profile.npc.arts = [...combat.arts]; }
+}
 
 export const RELATIONSHIPS: RelationshipState[] = [
   { id: 'rel-npc-bai-qingshan-npc-gu-wen', subjectId: 'npc-bai-qingshan', targetId: 'npc-gu-wen', trust: 20, respect: 60, fear: 0, affection: 35, debt: 0, grudge: 0 },

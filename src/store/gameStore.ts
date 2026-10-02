@@ -732,6 +732,8 @@ export const useGameStore = create<GameStore>()(
       
       revive: () => {
         const { gameState } = get();
+        // Origin characters do not auto-revive: defeat is resolved by the simulation, and death is final.
+        if (gameState.character?.originId) return;
         if (gameState.character) {
           const revivedHp = Math.floor(gameState.character.stats.maxHp / 2);
           const updatedCharacter = {
