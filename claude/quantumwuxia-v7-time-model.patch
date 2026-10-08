@@ -1,0 +1,1957 @@
+diff --git a/doc/AUDIT_2026-10-01.md b/doc/AUDIT_2026-10-01.md
+index 5a7fb5e..6accf92 100644
+--- a/doc/AUDIT_2026-10-01.md
++++ b/doc/AUDIT_2026-10-01.md
+@@ -249,3 +249,38 @@ The Bible has not been updated to reflect decisions made since 1.0. They are rec
+ - Calibration is by measurement on the opening state only (start-level characters beat power 10-45 NPCs most of the time and lose to power 80+ ones); it has not been balance-tested over a campaign.
+ - `Combat.tsx` is still dead code and `Spellbook`, `Bestiary`, `SkillTree` are not connected to any of this.
+ - Nothing here was played in a browser.
++
++
++## 13. v7: the time model (Bible §11) and the framework/content split
++
++**Design rule adopted for this and later work:** the framework (`src/engine`, `src/ai`) provides systems; a setting's content (`src/world/content`) is replaceable data; and what actually happens in a game (story progression, which skills the character learns, how NPCs change) comes from the player's decisions and free-text intents run through those systems. `test/simulation/architecture.test.ts` now enforces it: the framework may not import content, UI, stores or network code, may not call `Math.random`/`Date.now` (the one entropy source is `rng.randomSeed`), and may not contain any authored place/person/faction/art/plot id. Known exception: the small placeholder world in `createDefaultJianghu` (`engine/jianghu.ts`), kept for legacy games and old tests.
++
++**Where earlier work leans toward authored story** (your call whether to trim it): the three seeded world events with their seven finales are seed content, but they are only data and every outcome is chosen from player-influenced state (presence, goodwill, knowledge). The origins' "hooks" and the NPC secrets are authored. Nothing in the framework requires any of them, and an empty world still runs.
++
++### What changed
++- **One clock.** `world.turn` is now measured in ticks of four hours (six per day). Date, season, year and time of day are derived from it (`engine/clock.ts`), so there is nothing to drift. A game opts in with `world.clock`; worlds without it (older saves, bare test fixtures) count ticks but feel no day, night or weather, so their behaviour is unchanged. `GameState.turnCount` still counts the player's actions.
++- **Real distances.** The authored roads are engine data (`world.map`); travel time is the shortest route (a day is six ticks), stretched by weather. A place with no road is blocked at no cost. Before, any known place was one tick away.
++- **The player is on the road while travelling** and the world ticks every step: rumors spread, NPCs run errands, slow events advance, and nothing is witnessed (a finale at the destination mid-journey is not seen).
++- **Deterministic weather** (`engine/weather.ts`): a pure function of (seed, day, season, climate), in two-day spells, with climate tables (mountain, cold, marsh, river...). It slows travel, makes stealth easier and looking harder, and adds fatigue outdoors. Nothing is stored, so it is replayable.
++- **Darkness and sleep.** Night helps stealth (-10 difficulty) and hampers inspection (+10). NPCs sleep in the small hours by default; an explicit routine overrides it (the ferry captain sleeps by day, the archivist never sleeps). Talking to a sleeper is blocked with no time passing, and the choice generator offers "Rest until afternoon when Captain Ma Tie will be up" instead of a doomed conversation.
++- **Open-ended time intents**: "rest until dawn", "sleep overnight", "wait for a watch", "rest for two days", "meditate until midnight" (bounded to four days). Rest and meditation now scale with the time spent, and wounds heal with the passing ticks (rest doubles it).
++- **NPC movement takes time** (`engine/routine.ts`). Routines, homes and travel goals all walk the map; an NPC on the road is in no place. Departures and arrivals the player could see become events the narrator hears ("Su Mian sets out for Moonwell Grove."). Goals can open later (`notBefore`) and can make the destination a new home (`settle`).
++- **Fixed on the way:** (1) an old rule teleported any NPC who was not with the player to a faction territory every fifth turn, which would also have pulled story-relocated NPCs back; it is replaced by routines. (2) Keyword matching read substrings inside words: I observed "Inspect the camphor tree shrine" read as a rest action once "camp" became a keyword, and by the same logic "forest" contains "rest"; keywords now match only at the start of a word. (3) A finale's `moveTo` now relocates an NPC properly (new home, old routine dropped).
++- Narration: the digest and fallback narrator now carry the time of day, weather, journey length, sleepers, blocked reasons ("X is asleep. No time passed.") and visible arrivals and departures. The side panel shows the date, time and weather.
++- Origins can open at a chosen time of day so their first choices are playable (the ferry opens in the afternoon or evening, when the captain and the singer are awake). Saves from before the calendar get the clock, roads and routines on their next action (`upgradeWuxiaWorld`, idempotent, keeps story relocations).
++
++### Bible §11 status
++| Item | Before | Now |
++|---|---|---|
++| Time of day, date, season | Gap | Met (derived, saved, shown) |
++| Weather and its effects | Gap | Met for travel, stealth, inspection, fatigue; NPCs and markets ignore it |
++| Travel duration and routes | Gap | Met (map routes, weather delay); no encounters or choices en route |
++| Daily routines and schedules | Gap | Met (data-driven); content authors few routines so far |
++| Seasonal effects | Gap | Partial: weather tables vary by season; no harvests, prices, festivals or calendar-dated events |
++
++### Known limits
++- No dated events ("the assembly is on the 20th"): events still advance by pace in ticks, so a general scheduled-event system is the natural next piece.
++- A journey cannot be interrupted, and nothing happens on the road. NPCs cannot be followed or intercepted mid-journey.
++- Sleeping NPCs have no special rules for attacks or theft. NPCs do not react to weather, and markets do not close at night.
++- Existing tests assuming "one action = one tick" were updated (rest now takes two ticks and talks can be blocked by sleep); the finale calibration holds per tick.
++- Nothing here was played in a browser.
+diff --git a/doc/DECISIONS.md b/doc/DECISIONS.md
+index c778e01..54ac4d4 100644
+--- a/doc/DECISIONS.md
++++ b/doc/DECISIONS.md
+@@ -22,7 +22,15 @@ Candidate Bible §18 entries from the v2-v5 work. Each says what changed, why, a
+ | D15 | Defeat resolves as mercy, robbery, detention or death by fixed rules; death needs a lethal, high-risk attack on a master (power 70+) with a large margin, and never happens at a monastery. Origin characters cannot revive. | Bible §7: new situations, no automatic revive. | `chooseDefeat`, store, DeathScreen |
+ | D16 | Injuries have mechanical effects by region (arms: fighting; legs: travel and stealth; internal: Qi recovery); rest speeds healing. | Bible §7 examples. | `combat.ts`, `wuxiaRules.ts`, resolver |
+ 
++| D17 | `world.turn` is a tick of four hours (six a day); `turnCount` counts player actions. The calendar is opt-in per world (`world.clock`); worlds without it feel no day, night or weather. | Bible §11. Opt-in keeps old saves and test fixtures byte-for-byte stable. | `clock.ts`, resolver, pipeline |
++| D18 | Travel time comes from `world.map` routes and weather; the player is "in transit" (no location, no witnessing) for all but the last tick; blocked actions take no time. | A journey must let the world move and must not let the player see what they missed. | `worldMap.ts`, `environment.ts`, resolver |
++| D19 | Weather is a pure function of (seed, day, season, climate); never stored. | Replayable (D11) and save-proof. | `weather.ts` |
++| D20 | NPCs sleep in the small hours unless a routine says otherwise; routines and homes are data; movement takes route time; the old random teleport is removed. Story relocations set a new home and drop the routine. | Bible §9, §11. | `routine.ts`, `finale.ts`, `jianghu.ts` |
++| D21 | Players state durations in free text ("until dawn", "for two days"), capped at four days. | Intent-driven play. | `actionInterpreter.ts` |
++| D22 | Framework vs content is a tested boundary: the engine/AI layers may not import content or UI, use randomness, or name authored ids. | Content and story should come from data and from the player, not the code. | `architecture.test.ts` |
++
+ ## Open decisions (not made)
++- **Dated and scheduled events** (a framework system so content and player actions can set "something happens on day N").
+ - **V5 causal branching is never reached in live play** (V4 sets the shared timer first). Activating it changes outcomes: its default branch for low-severity faction events is "de-escalate", which would end disputes early. Recommendation: do not activate until finales cover the branches it would otherwise decide.
+ - **Time model** (hour/date/season/weather, travel duration from the weighted map): Bible §11, absent.
+ - **Defeat model** to replace `revive()`: capture, ransom, forced debt, scar, per Bible §7.
+diff --git a/src/ai/choiceGenerator.ts b/src/ai/choiceGenerator.ts
+index 8d919ba..e5a253a 100644
+--- a/src/ai/choiceGenerator.ts
++++ b/src/ai/choiceGenerator.ts
+@@ -1,4 +1,7 @@
++import { phaseWord, timeOf } from '../engine/clock';
++import { environmentAt } from '../engine/environment';
+ import { chainPace } from '../engine/jianghu';
++import { isAsleep, nextAwakePhase } from '../engine/routine';
+ import { interpretPlayerAction } from '../engine/actionInterpreter';
+ import type { ProposedAction, RiskLevel, SimulationState } from '../engine/types';
+ import type { NarrationChoice } from './validateNarration';
+@@ -41,9 +44,14 @@ export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}
+   });
+   if (imminent) add('Watch and listen closely to see how things unfold here', 'low', 'inspect');
+ 
+-  // 2. People present, those with news the player has not heard first.
++  // 2. People present who are awake, those with news the player has not heard first.
+   const playerId = state.character.id;
+-  const present = (jianghu?.npcs ?? []).filter(n => n.alive && n.locationId === here);
++  const calendar = state.world.clock !== undefined;
++  const phase = timeOf(state.world).phase;
++  const env = calendar ? environmentAt(state, here) : undefined;
++  const inHere = (jianghu?.npcs ?? []).filter(n => n.alive && n.locationId === here);
++  const present = inHere.filter(n => !(calendar && isAsleep(n, phase)));
++  const asleep = inHere.filter(n => calendar && isAsleep(n, phase));
+   const hasNews = (id: string) => jianghu!.rumors.some(r => r.knownBy.includes(id) && !r.knownBy.includes(playerId));
+   const people = [...present].sort((a, b) => Number(hasNews(b.id)) - Number(hasNews(a.id)) || a.id.localeCompare(b.id));
+   if (people[0]) add(`Talk to ${people[0].name}`, 'low', 'talk');
+@@ -53,6 +61,10 @@ export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}
+   if (features.length) add(`Inspect the ${features[state.world.turn % features.length]}`, 'low', 'inspect');
+ 
+   // 4. Somewhere to go: nearest first.
++  // Someone worth talking to is asleep: the way to reach them is to let time pass.
++  const sleeper = asleep.find(n => hasNews(n.id)) ?? asleep[0];
++  const wakes = sleeper ? nextAwakePhase(sleeper, phase) : undefined;
++  if (sleeper && wakes && !people[0]) add(`Rest until ${phaseWord(wakes)} when ${sleeper.name} will be up`, 'low', 'rest');
+   const roads = (ctx.neighbours?.(here) ?? []).filter(r => state.world.locationIds.includes(r.id)).sort((a, b) => a.days - b.days || a.id.localeCompare(b.id));
+   const risk = (days: number): RiskLevel => (days >= 3 ? 'high' : days === 2 ? 'medium' : 'low');
+   if (roads[0]) add(`Travel to ${roads[0].id}`, risk(roads[0].days), 'travel');
+@@ -69,6 +81,8 @@ export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}
+   if (people[1]) add(`Talk to ${people[1].name}`, 'low', 'talk');
+   if (roads[1]) add(`Travel to ${roads[1].id}`, risk(roads[1].days), 'travel');
+   if (features.length > 1) add(`Inspect the ${features[(state.world.turn + 1) % features.length]}`, 'low', 'inspect');
++  if (env && !env.time.isNight && ['storm', 'blizzard'].includes(env.weather.kind) && !env.indoors) add('Wait out the weather for a day', 'low', 'rest');
++  if (env?.time.isNight) add('Rest until dawn', 'low', 'rest');
+   const worn = state.character.fatigue >= 40 || state.character.hp < state.character.maxHp;
+   add(worn ? 'Rest and recover your strength' : 'Meditate quietly to steady your Qi', 'low', worn ? 'rest' : 'meditate');
+   add(worn ? 'Meditate quietly to steady your Qi' : 'Rest and recover your strength', 'low', worn ? 'meditate' : 'rest');
+diff --git a/src/ai/fallbackNarrator.ts b/src/ai/fallbackNarrator.ts
+index 5ce6e1c..55d827a 100644
+--- a/src/ai/fallbackNarrator.ts
++++ b/src/ai/fallbackNarrator.ts
+@@ -1,4 +1,7 @@
+ import { regionName } from '../engine/bout';
++import { describeDuration, describeTime } from '../engine/clock';
++import { environmentAt } from '../engine/environment';
++import { weatherWord } from '../engine/weather';
+ import type { ActionResolution, ResolutionStatus, StateEvent } from '../engine/types';
+ 
+ export interface FallbackNarratorOptions {
+@@ -34,7 +37,11 @@ export function fallbackNarration(resolution: ActionResolution, options: Fallbac
+     if (e.type === 'world.location_changed' && witnessed(e)) {
+       const to = str(e.payload.to) ?? state.character.locationId;
+       const note = options.locationNotes?.[to];
+-      parts.push(`You arrive at ${to}.${note ? ` ${firstSentence(note)}` : ''}`);
++      const ticks = typeof e.payload.ticks === 'number' ? e.payload.ticks : 0;
++      const took = ticks > 1 ? ` After ${describeDuration(ticks).replace(/^about /, '')} on the road${e.payload.delayed === true ? ', slowed by the weather,' : ''} you arrive at ${to}.` : ` You arrive at ${to}.`;
++      parts.push(`${took.trim()}${note ? ` ${firstSentence(note)}` : ''}`);
++    } else if (e.type === 'world.npc_moved' && witnessed(e) && e.payload.npcId !== playerId) {
++      parts.push(e.payload.arriving === true ? `${npcName(str(e.payload.npcId))} arrives.` : `${npcName(str(e.payload.npcId))} sets out for ${str(e.payload.to)}.`);
+     } else if (e.type === 'world.fact_discovered' && witnessed(e)) {
+       const fact = str(e.payload.fact); const via = str(e.payload.via);
+       if (fact?.startsWith('inspected:')) parts.push(`You study ${fact.slice('inspected:'.length)} closely.`);
+@@ -61,7 +68,12 @@ export function fallbackNarration(resolution: ActionResolution, options: Fallbac
+     parts.push(`${npcName(action.targetId)} has little new to say; you trade courtesies.`);
+   }
+ 
++  if (status === 'blocked') parts.push(`${resolution.summary} No time passes.`);
+   const here = state.character.locationId;
++  if (state.world.clock) {
++    const env = environmentAt(state, here);
++    parts.push(`${describeTime(env.time)}.${env.indoors ? '' : ` ${weatherWord(env.weather).charAt(0).toUpperCase()}${weatherWord(env.weather).slice(1)} outside.`}`);
++  }
+   const others = (state.jianghu?.npcs ?? []).filter(n => n.alive && n.locationId === here).map(n => n.name);
+   if (others.length) parts.push(`Around you in ${here}: ${others.join(', ')}.`);
+   return parts.join('\n\n');
+diff --git a/src/components/GameScreen.tsx b/src/components/GameScreen.tsx
+index 8d540d1..abe76d1 100644
+--- a/src/components/GameScreen.tsx
++++ b/src/components/GameScreen.tsx
+@@ -1,3 +1,6 @@
++import { describeTime } from '../engine/clock';
++import { environmentAt } from '../engine/environment';
++import { weatherWord } from '../engine/weather';
+ import { useState, useRef, useEffect } from 'react';
+ import { useGameStore } from '../store/gameStore';
+ import { Send, Swords, Scroll, User, Settings, Package, MapPin, Heart, Droplets, Coins, Star, Zap, AlertCircle, Save, BookOpen, Database } from 'lucide-react';
+@@ -564,6 +567,15 @@ function RightPanel() {
+   
+   return (
+     <div className="p-4 space-y-4">
++      {isWuxia && simulation?.world.clock && (() => {
++        const env = environmentAt(simulation, locationId);
++        return (
++          <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700 text-xs">
++            <div className="font-semibold text-gray-200">{describeTime(env.time)}</div>
++            <div className="mt-0.5 text-gray-400">{env.indoors ? 'Sheltered indoors' : weatherWord(env.weather).replace(/^./, c => c.toUpperCase())}</div>
++          </div>
++        );
++      })()}
+       {/* Quest Log */}
+       <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700">
+         <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">
+diff --git a/src/engine/actionInterpreter.ts b/src/engine/actionInterpreter.ts
+index b571b68..527a053 100644
+--- a/src/engine/actionInterpreter.ts
++++ b/src/engine/actionInterpreter.ts
+@@ -1,4 +1,5 @@
+ import { matchTechniqueText } from './combat';
++import { TICKS_PER_DAY, ticksUntilPhase, type Phase } from './clock';
+ import type { ProposedAction, RiskLevel, SimulationState } from './types';
+ 
+ const KEYWORDS: Array<[ProposedAction['kind'], string[]]> = [
+@@ -6,14 +7,20 @@ const KEYWORDS: Array<[ProposedAction['kind'], string[]]> = [
+   ['attack', ['attack', 'fight', 'strike', 'hit ', 'ambush', 'kill ', 'duel']],
+   ['stealth', ['sneak', 'hide', 'creep', 'stealth', 'slip past', 'conceal']],
+   ['meditate', ['meditate', 'cultivate', 'focus qi', 'circulate qi', 'breathe']],
+-  ['rest', ['rest', 'sleep', 'wait quietly', 'recover', 'catch my breath']],
++  ['rest', ['rest', 'sleep', 'wait ', 'make camp', 'camp out', 'overnight', 'recover', 'catch my breath', 'lie low']],
+   ['talk', ['talk', 'speak', 'ask ', 'question', 'negotiate', 'call out', 'persuade']],
+   ['train', ['train', 'practice', 'practise', 'drill', 'rehearse', 'hone ']],
+   ['inspect', ['inspect', 'examine', 'search', 'look ', 'read ', 'listen', 'study', 'investigate']],
+ ];
+ 
++/** A keyword counts only where a word starts, so "rest" no longer matches "forest" and "camp" no longer matches "camphor". */
+ function includesAny(text: string, keywords: string[]): boolean {
+-  return keywords.some(keyword => text.includes(keyword));
++  return keywords.some(keyword => {
++    const at = text.indexOf(keyword);
++    if (at === -1) return false;
++    for (let i = at; i !== -1; i = text.indexOf(keyword, i + 1)) if (i === 0 || !/[a-z]/.test(text[i - 1])) return true;
++    return false;
++  });
+ }
+ 
+ function inferTarget(text: string, simulation: SimulationState): string | undefined {
+@@ -37,6 +44,35 @@ function inferApproach(text: string): string | undefined {
+   return approaches.find(([keyword]) => text.includes(keyword))?.[1];
+ }
+ 
++const UNTIL: Array<[RegExp, Phase]> = [
++  [/\b(?:dawn|daybreak|sunrise|first light)\b/, 'dawn'],
++  [/\b(?:morning)\b/, 'morning'],
++  [/\b(?:noon|midday|afternoon)\b/, 'afternoon'],
++  [/\b(?:dusk|sunset|evening|nightfall)\b/, 'evening'],
++  [/\b(?:midnight|small hours)\b/, 'late_night'],
++  [/\b(?:night)\b/, 'night'],
++];
++const NUMBER: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8 };
++
++/**
++ * How long a player wants to spend waiting, resting or meditating, in ticks: "until dawn", "overnight",
++ * "for two days", "for a watch". Undefined when they name no duration, so the action keeps its default.
++ * Bounded to four days so a typo cannot skip the world.
++ */
++export function inferDuration(lower: string, simulation: SimulationState): number | undefined {
++  const until = lower.match(/\b(?:until|till|til|before|\bto)\s+(?:the\s+)?(?:next\s+)?([a-z ]+)/);
++  if (until) for (const [pattern, phase] of UNTIL) if (pattern.test(until[1])) return Math.min(4 * TICKS_PER_DAY, ticksUntilPhase(simulation.world, phase));
++  if (/\bovernight\b|\bthrough the night\b|\bsleep\b/.test(lower) && !/\bsleep(?:ing)? (?:in|on|at)\b.*\b(?:day|noon)\b/.test(lower)) return ticksUntilPhase(simulation.world, 'dawn');
++  const span = lower.match(/\bfor\s+(an?|one|two|three|four|five|six|seven|eight|\d+)\s+(day|days|night|nights|watch|watches|hour|hours)\b/);
++  if (span) {
++    const n = NUMBER[span[1]] ?? Number(span[1]);
++    const unit = span[2];
++    const ticks = unit.startsWith('day') ? n * TICKS_PER_DAY : unit.startsWith('night') ? n * TICKS_PER_DAY : unit.startsWith('watch') ? n : Math.ceil(n / 4);
++    return Math.max(1, Math.min(4 * TICKS_PER_DAY, ticks));
++  }
++  return undefined;
++}
++
+ /**
+  * Resolve a technique the player names to a technique they actually own. Free text that names
+  * nothing they know ("with my sword") is dropped rather than passed on, so a casual phrase can
+@@ -106,6 +142,7 @@ export function interpretPlayerAction(
+   const intendedGoal = inferGoal(normalized, simulation);
+   const conditionalClauses = inferConditionalClauses(lower);
+   const declaredConstraints = inferDeclaredConstraints(lower);
++  const duration = kind === 'rest' || kind === 'meditate' ? inferDuration(lower, simulation) : undefined;
+ 
+   return {
+     kind,
+@@ -117,6 +154,7 @@ export function interpretPlayerAction(
+     ...(targetId ? { targetId } : {}),
+     ...(approach ? { approach } : {}),
+     ...(techniqueId ? { techniqueId } : {}),
++    ...(duration ? { timeCost: duration } : {}),
+     ...(intendedGoal ? { intendedGoal } : {}),
+     ...(conditionalClauses ? { conditionalClauses } : {}),
+     ...(declaredConstraints ? { declaredConstraints } : {}),
+diff --git a/src/engine/actionPipeline.ts b/src/engine/actionPipeline.ts
+index e53592a..c63ec24 100644
+--- a/src/engine/actionPipeline.ts
++++ b/src/engine/actionPipeline.ts
+@@ -32,7 +32,8 @@ export function resolvePlayerAction(
+   const resolution = resolveAction(simulation, action, roll ?? rollAt(rng.seed, rng.draws));
+   // An explicit roll consumes nothing, so a replay that injects rolls does not disturb the saved sequence.
+   resolution.state.world.rng = roll === undefined ? consumeDraw(rng) : rng;
+-  const nextGameState = exitSimulationBoundary(gameState, resolution.state);
++  // `turnCount` counts the player's actions; the simulation's own clock (`world.turn`) counts four-hour ticks.
++  const nextGameState = { ...exitSimulationBoundary(gameState, resolution.state), turnCount: gameState.turnCount + 1 };
+ 
+   return { resolution, nextGameState };
+ }
+diff --git a/src/engine/clock.ts b/src/engine/clock.ts
+new file mode 100644
+index 0000000..1689409
+--- /dev/null
++++ b/src/engine/clock.ts
+@@ -0,0 +1,107 @@
++/**
++ * The world clock (Game Bible section 11). Framework only: it knows nothing about
++ * any particular setting. `world.turn` is the single source of time: one tick is one
++ * four-hour watch, six ticks make a day. Date, season and time of day are derived
++ * from it, so there is no second counter to drift out of sync and old saves just work.
++ */
++export const TICKS_PER_DAY = 6;
++export const HOURS_PER_TICK = 24 / TICKS_PER_DAY;
++
++export type Phase = 'late_night' | 'dawn' | 'morning' | 'afternoon' | 'evening' | 'night';
++export const PHASES: readonly Phase[] = ['late_night', 'dawn', 'morning', 'afternoon', 'evening', 'night'];
++export type Season = 'spring' | 'summer' | 'autumn' | 'winter';
++export const SEASONS: readonly Season[] = ['spring', 'summer', 'autumn', 'winter'];
++
++export interface ClockConfig {
++  daysPerSeason: number;
++  /** Where the story starts: turn 0 is this season, day-of-season (1-based) and tick of day (0-5). */
++  startSeason: Season;
++  startDayOfSeason: number;
++  startTickOfDay: number;
++}
++
++/** A morning in mid-autumn. */
++export const DEFAULT_CLOCK: ClockConfig = { daysPerSeason: 30, startSeason: 'autumn', startDayOfSeason: 12, startTickOfDay: 2 };
++
++export interface WorldTime {
++  /** Ticks since the story began (== world.turn). */
++  tick: number;
++  /** Whole days since the story began (0-based). */
++  day: number;
++  /** 1-based day within the current season. */
++  dayOfSeason: number;
++  season: Season;
++  /** 0-based year since the story began. */
++  year: number;
++  tickOfDay: number;
++  phase: Phase;
++  isNight: boolean;
++}
++
++export const isDarkPhase = (phase: Phase) => phase === 'late_night' || phase === 'night';
++
++export function clockOf(world: { clock?: ClockConfig }): ClockConfig {
++  return world.clock ?? DEFAULT_CLOCK;
++}
++
++export function timeAt(turn: number, config: ClockConfig = DEFAULT_CLOCK): WorldTime {
++  const tick = Math.max(0, Math.floor(turn));
++  const seasonIndex = SEASONS.indexOf(config.startSeason);
++  const absoluteTick = tick + config.startTickOfDay;
++  const day = Math.floor(absoluteTick / TICKS_PER_DAY);
++  const tickOfDay = absoluteTick % TICKS_PER_DAY;
++  const daysIntoSeasons = (config.startDayOfSeason - 1) + day;
++  const seasonsElapsed = Math.floor(daysIntoSeasons / config.daysPerSeason);
++  const phase = PHASES[tickOfDay];
++  return {
++    tick, day,
++    dayOfSeason: (daysIntoSeasons % config.daysPerSeason) + 1,
++    season: SEASONS[(seasonIndex + seasonsElapsed) % SEASONS.length],
++    year: Math.floor((seasonIndex + seasonsElapsed) / SEASONS.length),
++    tickOfDay, phase, isNight: isDarkPhase(phase),
++  };
++}
++
++export function timeOf(world: { turn: number; clock?: ClockConfig }): WorldTime {
++  return timeAt(world.turn, clockOf(world));
++}
++
++/** Ticks from now until the START of `phase` (a full day if it is the current phase). */
++export function ticksUntilPhase(world: { turn: number; clock?: ClockConfig }, phase: Phase): number {
++  const target = PHASES.indexOf(phase);
++  const now = timeOf(world).tickOfDay;
++  return ((target - now + TICKS_PER_DAY) % TICKS_PER_DAY) || TICKS_PER_DAY;
++}
++
++const PHASE_WORDS: Record<Phase, string> = {
++  late_night: 'the small hours', dawn: 'dawn', morning: 'morning', afternoon: 'afternoon', evening: 'evening', night: 'night',
++};
++export const phaseWord = (phase: Phase) => PHASE_WORDS[phase];
++
++/** "Morning, day 12 of autumn" (year only once a year has passed). */
++export function describeTime(t: WorldTime): string {
++  const when = phaseWord(t.phase);
++  return `${when.charAt(0).toUpperCase()}${when.slice(1)}, day ${t.dayOfSeason} of ${t.season}${t.year > 0 ? `, year ${t.year + 1}` : ''}`;
++}
++
++const NUMBER_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
++const word = (n: number) => NUMBER_WORDS[n] ?? String(n);
++
++/** Plain words for a span of ticks: "about four hours", "a day and a half", "three days". */
++export function describeDuration(ticks: number): string {
++  if (ticks <= 0) return 'no time at all';
++  if (ticks < TICKS_PER_DAY) return `about ${ticks * HOURS_PER_TICK} hours`;
++  const whole = Math.floor(ticks / TICKS_PER_DAY);
++  const rest = ticks % TICKS_PER_DAY;
++  const days = (n: number) => (n === 1 ? 'a day' : `${word(n)} days`);
++  if (rest === 0) return days(whole);
++  if (rest === TICKS_PER_DAY / 2) return whole === 1 ? 'a day and a half' : `${word(whole)} and a half days`;
++  return rest < TICKS_PER_DAY / 2 ? `a little over ${days(whole)}` : `nearly ${days(whole + 1)}`;
++}
++
++export function validClock(c: ClockConfig): boolean {
++  return Number.isInteger(c.daysPerSeason) && c.daysPerSeason >= 1 && c.daysPerSeason <= 366
++    && SEASONS.includes(c.startSeason)
++    && Number.isInteger(c.startDayOfSeason) && c.startDayOfSeason >= 1 && c.startDayOfSeason <= c.daysPerSeason
++    && Number.isInteger(c.startTickOfDay) && c.startTickOfDay >= 0 && c.startTickOfDay < TICKS_PER_DAY;
++}
+diff --git a/src/engine/environment.ts b/src/engine/environment.ts
+new file mode 100644
+index 0000000..1de20b2
+--- /dev/null
++++ b/src/engine/environment.ts
+@@ -0,0 +1,62 @@
++import { timeOf, type WorldTime } from './clock';
++import type { SimulationState, ProposedAction } from './types';
++import { weatherEffects, weatherOn, NIGHT_EFFECTS, type Weather } from './weather';
++import { climateAt, isIndoors, routeTicks } from './worldMap';
++
++/**
++ * What the clock, the weather and the place do to an action. Framework only: it reads
++ * the saved clock, map and seed, and nothing about any particular setting.
++ */
++export interface Environment {
++  time: WorldTime;
++  weather: Weather;
++  indoors: boolean;
++  /**
++   * Whether this world has opted into the calendar (it carries a `clock`). Worlds without one
++   * (older saves, bare test fixtures) still count ticks but feel no day, night or weather, so
++   * their behaviour stays exactly what it was.
++   */
++  calendar: boolean;
++}
++
++export function environmentAt(sim: Pick<SimulationState, 'world'>, locationId: string): Environment {
++  const time = timeOf(sim.world);
++  const weather = weatherOn(time.day, time.season, climateAt(sim.world.map, locationId), sim.world.rng?.seed ?? 0);
++  return { time, weather, indoors: isIndoors(sim.world.map, locationId), calendar: sim.world.clock !== undefined };
++}
++
++type Modified = 'stealth' | 'inspect' | 'travel' | 'attack';
++const MODIFIED: ReadonlySet<string> = new Set(['stealth', 'inspect', 'travel', 'attack']);
++
++/** Added to an action's difficulty by darkness and (outdoors) weather. */
++export function difficultyModifier(kind: ProposedAction['kind'], env: Environment): number {
++  if (!env.calendar || !MODIFIED.has(kind)) return 0;
++  const k = kind as Modified;
++  let total = 0;
++  if (env.time.isNight && k !== 'attack') total += NIGHT_EFFECTS[k as keyof typeof NIGHT_EFFECTS] ?? 0;
++  if (!env.indoors) total += weatherEffects(env.weather).difficulty[k] ?? 0;
++  return total;
++}
++
++/** Fatigue added per tick by the weather, for anyone outdoors. */
++export function weatherFatigue(env: Environment): number {
++  return !env.calendar || env.indoors ? 0 : weatherEffects(env.weather).fatiguePerTick;
++}
++
++export interface Journey { ticks: number; baseTicks: number; weather: Weather; delayed: boolean }
++
++/**
++ * How long a journey takes: the map's route time stretched by the worse of the weather at
++ * both ends on the day of departure. Undefined means no route exists on a map that has roads.
++ */
++export function journeyTicks(sim: Pick<SimulationState, 'world'>, from: string, to: string): Journey | undefined {
++  const map = sim.world.map;
++  const base = routeTicks(map, from, to);
++  if (base === undefined) return map ? undefined : { ticks: 1, baseTicks: 1, weather: { kind: 'clear' }, delayed: false };
++  if (base === 0) return { ticks: 0, baseTicks: 0, weather: { kind: 'clear' }, delayed: false };
++  const a = environmentAt(sim, from).weather; const b = environmentAt(sim, to).weather;
++  const worse = weatherEffects(a).travelMultiplier >= weatherEffects(b).travelMultiplier ? a : b;
++  const calendar = sim.world.clock !== undefined;
++  const ticks = calendar ? Math.ceil(base * weatherEffects(worse).travelMultiplier) : base;
++  return { ticks, baseTicks: base, weather: worse, delayed: ticks > base };
++}
+diff --git a/src/engine/finale.ts b/src/engine/finale.ts
+index 2fd8148..3446f54 100644
+--- a/src/engine/finale.ts
++++ b/src/engine/finale.ts
+@@ -30,6 +30,8 @@ export interface FinaleGoalSpec {
+   description: string;
+   priority: number;
+   targetId?: string;
++  notBefore?: number;
++  settle?: boolean;
+ }
+ 
+ export type FinaleEffect =
+@@ -130,7 +132,8 @@ function applyEffect(e: FinaleEffect, j: JianghuState, sim: SimulationState, tur
+       if (e.resources) n.resources = clamp(n.resources + e.resources);
+       if (e.moveTo) {
+         if (!sim.world.locationIds.includes(e.moveTo)) return false;
+-        n.locationId = e.moveTo;
++        // A story relocation is a change of life, not an errand: they live there now and drop the old routine.
++        n.locationId = e.moveTo; n.homeId = e.moveTo; n.routine = undefined; n.transit = undefined;
+       }
+       return true;
+     }
+diff --git a/src/engine/jianghu.ts b/src/engine/jianghu.ts
+index bbc77dd..6b165b6 100644
+--- a/src/engine/jianghu.ts
++++ b/src/engine/jianghu.ts
+@@ -1,5 +1,6 @@
+ import type { ProposedAction, SimulationState, StateEvent } from './types';
+ import { isHonourableBout } from './bout';
++import { advanceRoutines } from './routine';
+ import type { FinaleSpec } from './finale';
+ 
+ export type MemoryValence = 'positive' | 'negative' | 'neutral';
+@@ -23,6 +24,10 @@ export interface NPCGoal {
+   priority: number;
+   progress: number;
+   active: boolean;
++  /** The goal only becomes pursuable from this tick on ("before the autumn moon", not today). */
++  notBefore?: number;
++  /** On reaching a travel goal's destination the NPC makes it their new home and drops their old routine. */
++  settle?: boolean;
+ }
+ 
+ export interface NPCState {
+@@ -43,6 +48,12 @@ export interface NPCState {
+   power?: number;
+   /** Martial art ids this NPC practises (used for counters). */
+   arts?: string[];
++  /** Where they sleep and belong; with no `routine`, they return here after dark. */
++  homeId?: string;
++  /** Daily routine by time of day (see routine.ts). */
++  routine?: import('./routine').RoutineEntry[];
++  /** Set while walking between places; their `locationId` is the transit sentinel until they arrive. */
++  transit?: import('./routine').NpcTransit;
+ }
+ 
+ export interface FactionState {
+@@ -447,7 +458,7 @@ function propagateRumors(jianghu: JianghuState, simulation: SimulationState, eve
+ function advanceNpcGoals(jianghu: JianghuState, simulation: SimulationState, events: StateEvent[]): void {
+   for (const npc of jianghu.npcs) {
+     if (!npc.alive) continue;
+-    const goal = npc.goals.filter(g => g.active).sort((a, b) => b.priority - a.priority)[0];
++    const goal = npc.goals.filter(g => g.active && (g.notBefore === undefined || simulation.world.turn >= g.notBefore)).sort((a, b) => b.priority - a.priority)[0];
+     if (!goal) continue;
+     if (goal.kind === 'travel' && goal.targetId && npc.locationId === goal.targetId) goal.progress = 100;
+     else if (goal.kind === 'protect' && npc.locationId === simulation.character.locationId) goal.progress = clamp(goal.progress + 2, 0, 100);
+@@ -481,13 +492,9 @@ export function tickJianghu(
+     faction.internalTension = clamp(faction.internalTension + (faction.resources < 15 ? 1 : cooling), 0, 100);
+   }
+ 
+-  for (const npc of jianghu.npcs) {
+-    if (!npc.alive) continue;
+-    if (npc.locationId !== simulation.character.locationId && turn % 5 === 0) {
+-      const faction = npc.factionId ? jianghu.factions.find(f => f.id === npc.factionId) : undefined;
+-      if (faction && faction.territory.length > 0) npc.locationId = faction.territory[turn % faction.territory.length];
+-    }
+-  }
++  // Movement is routine- and goal-driven and takes time (routine.ts); this replaces a rule that
++  // teleported absent NPCs to a random faction territory every fifth turn.
++  advanceRoutines(jianghu, simulation, events);
+ 
+   for (const rumor of jianghu.rumors) {
+     rumor.credibility = clamp(rumor.credibility + (rumor.status === 'confirmed' ? 1 : -1), 0, 100);
+diff --git a/src/engine/jianghuCausalityV3.ts b/src/engine/jianghuCausalityV3.ts
+index a299543..25457fd 100644
+--- a/src/engine/jianghuCausalityV3.ts
++++ b/src/engine/jianghuCausalityV3.ts
+@@ -1,5 +1,7 @@
+ import type { SimulationState, StateEvent } from './types';
+ import type { JianghuState, NPCState, RelationshipState, ObligationState, FactionRelationState, MarketState } from './jianghu';
++import { TRANSIT_LOCATION } from './worldMap';
++import { beginNpcTravel } from './routine';
+ import { createNpcPlan, emitNpcAgencyEvent, evaluateNpcOpportunity, executeNpcPlan, selectNpcGoal } from './npcAgency';
+ 
+ export interface V3Result {
+@@ -94,16 +96,18 @@ function autonomousNpcActions(j: JianghuState, simulation: SimulationState, even
+   const ordered = j.npcs
+     .filter(npc => npc.alive)
+     .sort((a, b) => {
+-      const pa = selectNpcGoal(a)?.priority ?? 0;
+-      const pb = selectNpcGoal(b)?.priority ?? 0;
++      const pa = selectNpcGoal(a, simulation.world.turn)?.priority ?? 0;
++      const pb = selectNpcGoal(b, simulation.world.turn)?.priority ?? 0;
+       return pb - pa || a.id.localeCompare(b.id);
+     });
+ 
+   for (const npc of ordered) {
+     if (budget <= 0) break;
+ 
++    if (npc.transit) continue; // on the road; they act again when they arrive
++
+     // Goal: choose the highest-priority active goal.
+-    const goal = selectNpcGoal(npc);
++    const goal = selectNpcGoal(npc, simulation.world.turn);
+     if (!goal) continue;
+ 
+     // Plan: turn the goal into a concrete deterministic plan.
+@@ -114,7 +118,12 @@ function autonomousNpcActions(j: JianghuState, simulation: SimulationState, even
+     if (!opportunity.available) continue;
+ 
+     // Action + consequence: mutate the cloned Jianghu state and emit a structured event.
+-    const result = executeNpcPlan(j, npc, plan, opportunity, simulation.world.turn, relation, ensureMarket);
++    const startedFrom = npc.locationId;
++    const result = executeNpcPlan(j, npc, plan, opportunity, simulation.world.turn, relation, ensureMarket, (who, to) => {
++      const ticks = beginNpcTravel(who, to, simulation);
++      const seen = startedFrom === simulation.character.locationId || (ticks === 0 && to === simulation.character.locationId);
++      events.push({ type: 'world.npc_moved', causes: [`npc:${who.id}:${ticks === 0 ? 'arrival' : 'departure'}`], witnesses: seen ? [simulation.character.id, who.id] : [who.id], knowledgeConsequences: seen ? [`player:saw:${who.id}:${ticks === 0 ? 'arrive' : 'leave'}`] : [], payload: { npcId: who.id, from: startedFrom, to, arriving: ticks === 0, arriveTurn: simulation.world.turn + ticks } });
++    });
+     if (!result.acted) continue;
+ 
+     budget--;
+@@ -130,9 +139,11 @@ export function applyCausalityV3(input: JianghuState, simulation: SimulationStat
+   advanceObligations(j, simulation, events);
+   applyFactionPressure(j, simulation, events);
+   autonomousNpcActions(j, simulation, events);
+-  const market = ensureMarket(j, simulation.character.locationId, simulation.world.turn);
+-  updateMarket(market, simulation.world.turn);
+-  events.push({ type: 'world.market_changed', causes: [`market:${market.locationId}:update`, `turn:${market.lastUpdatedTurn}:tick`], payload: { locationId: market.locationId, turn: market.lastUpdatedTurn } });
++  if (simulation.character.locationId !== TRANSIT_LOCATION) {
++    const market = ensureMarket(j, simulation.character.locationId, simulation.world.turn);
++    updateMarket(market, simulation.world.turn);
++    events.push({ type: 'world.market_changed', causes: [`market:${market.locationId}:update`, `turn:${market.lastUpdatedTurn}:tick`], payload: { locationId: market.locationId, turn: market.lastUpdatedTurn } });
++  }
+   return { jianghu: j, events };
+ }
+ 
+diff --git a/src/engine/narratorDigest.ts b/src/engine/narratorDigest.ts
+index 3e6a7a1..1f279e4 100644
+--- a/src/engine/narratorDigest.ts
++++ b/src/engine/narratorDigest.ts
+@@ -1,4 +1,8 @@
++import { describeDuration, describeTime, timeOf } from './clock';
++import { environmentAt } from './environment';
+ import { regionName } from './bout';
++import { isAsleep } from './routine';
++import { weatherWord } from './weather';
+ import { chainPace } from './jianghu';
+ import type { ActionResolution, StateEvent } from './types';
+ 
+@@ -44,8 +48,18 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
+   const happened: string[] = [];
+   for (const e of events) {
+     switch (e.type) {
+-      case 'world.location_changed':
+-        if (witnessed(e)) happened.push(`You travelled from ${str(e.payload.from)} to ${str(e.payload.to)}.`);
++      case 'world.location_changed': {
++        if (!witnessed(e)) break;
++        const ticks = num(e.payload.ticks);
++        const length = ticks && ticks > 1 ? ` The journey took ${describeDuration(ticks)}${e.payload.delayed === true ? ', slowed by the weather' : ''}.` : '';
++        happened.push(`You travelled from ${str(e.payload.from)} to ${str(e.payload.to)}.${length}`);
++        break;
++      }
++      case 'world.npc_moved':
++        if (witnessed(e) && e.payload.npcId !== playerId) {
++          const who = npcName(str(e.payload.npcId));
++          happened.push(e.payload.arriving === true ? `${who} arrives.` : `${who} sets out for ${str(e.payload.to)}.`);
++        }
+         break;
+       case 'world.fact_discovered': {
+         if (!witnessed(e)) break;
+@@ -104,18 +118,26 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
+     happened.push(`${npcName(action.targetId)} has nothing new to tell you right now; keep the exchange to courtesy and atmosphere.`);
+   }
+   if (state.character.fatigue >= 70) happened.push('You are visibly weary.');
++  if (resolution.status === 'blocked') happened.push(`The action did not happen: ${resolution.summary} No time passed.`);
++  const elapsed = num(events.find(e => e.type === 'action.resolved')?.payload.ticks);
++  if (elapsed && elapsed > 1 && action.kind !== 'travel') happened.push(`About ${describeDuration(elapsed).replace(/^about /, '')} passed.`);
+   lines.push('', 'What the player perceived this turn:');
+   lines.push(...(happened.length ? happened.map(h => `- ${h}`) : ['- Nothing notable beyond the attempt itself.']));
+ 
+   // Observable surroundings.
++  if (state.world.clock) {
++    const env = environmentAt(state, here);
++    lines.push('', `Time: ${describeTime(env.time)}.${env.indoors ? '' : ` Weather: ${weatherWord(env.weather)}.`}`);
++  }
+   lines.push('', `Current location: ${here}`);
+   const note = options.locationNotes?.[here];
+   if (note) lines.push(note);
+ 
+   if (jianghu) {
+     const present = jianghu.npcs.filter(n => n.alive && n.locationId === here);
++    const phase = timeOf(state.world).phase;
+     lines.push('', 'People visibly present:');
+-    lines.push(...(present.length ? present.map(n => `- ${n.name} (${n.role})`) : ['- No one of note.']));
++    lines.push(...(present.length ? present.map(n => `- ${n.name} (${n.role})${state.world.clock && isAsleep(n, phase) ? ' [asleep]' : ''}`) : ['- No one of note.']));
+ 
+     const target = action.targetId ? jianghu.npcs.find(n => n.id === action.targetId) : undefined;
+     const voice = target ? options.npcVoices?.[target.id] : undefined;
+diff --git a/src/engine/npcAgency.ts b/src/engine/npcAgency.ts
+index 9f1c01d..464753f 100644
+--- a/src/engine/npcAgency.ts
++++ b/src/engine/npcAgency.ts
+@@ -26,9 +26,9 @@ export interface NPCAgencyResult {
+ 
+ const clamp = (value: number, min = -100, max = 100) => Math.max(min, Math.min(max, value));
+ 
+-export function selectNpcGoal(npc: NPCState): NPCGoal | undefined {
++export function selectNpcGoal(npc: NPCState, turn?: number): NPCGoal | undefined {
+   return npc.goals
+-    .filter(goal => goal.active)
++    .filter(goal => goal.active && (goal.notBefore === undefined || turn === undefined || turn >= goal.notBefore))
+     .sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0];
+ }
+ 
+@@ -96,16 +96,20 @@ export function executeNpcPlan(
+   turn: number,
+   relation: (state: JianghuState, subjectId: string, targetId: string, turn: number) => { debt: number; grudge: number },
+   ensureMarket: (state: JianghuState, locationId: string, turn: number) => { goods: Record<string, number> },
++  /** Starts a journey that takes time. Without it (older callers, tests) travel is instant. */
++  walk?: (npc: NPCState, to: string) => void,
+ ): NPCAgencyResult {
+   if (!opportunity.available) return { plan, opportunity, acted: false };
+ 
+   switch (plan.kind) {
+     case 'travel': {
+-      npc.locationId = plan.targetId!;
++      if (walk) walk(npc, plan.targetId!); else npc.locationId = plan.targetId!;
+       const goal = npc.goals.find(goal => goal.id === plan.goalId);
+       if (goal) {
+         goal.progress = 100;
+         goal.active = false;
++        // A journey to somewhere they mean to stay: that is where they live now.
++        if (goal.settle) { npc.homeId = plan.targetId!; npc.routine = undefined; }
+       }
+       return { plan, opportunity, acted: true };
+     }
+diff --git a/src/engine/resolveAction.ts b/src/engine/resolveAction.ts
+index 49b65d7..190f570 100644
+--- a/src/engine/resolveAction.ts
++++ b/src/engine/resolveAction.ts
+@@ -7,6 +7,9 @@ import type {
+ } from './types';
+ import { validateState } from './validateState';
+ import { qiRecovery } from './wuxiaRules';
++import { environmentAt, difficultyModifier, journeyTicks, weatherFatigue } from './environment';
++import { isAsleep } from './routine';
++import { TRANSIT_LOCATION } from './worldMap';
+ import { applyDuel, applyMastery, bestCombatArt, duelDifficulty, findTechnique, combatEdge, injuryPenalty, masteryGain, techniqueLocked, type ArtUse } from './combat';
+ import { syncInjuries } from './wuxia';
+ import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
+@@ -124,7 +127,15 @@ export function resolveAction(
+   // A named technique costs its Qi; plain strikes, talk and travel cost none.
+   const named: ArtUse | undefined = findTechnique(c, normalizedAction.techniqueId);
+   const qiCost = normalizedAction.qiCost ?? named?.technique?.qiCost ?? 0;
+-  const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' || normalizedAction.kind === 'travel' || normalizedAction.kind === 'train' ? 2 : 1);
++  // How long it takes, in ticks (one tick = four hours). Travel follows the map and the weather;
++  // an explicit `timeCost` (for example "rest until dawn") overrides the default for everything else.
++  const journey = normalizedAction.kind === 'travel' && normalizedAction.destinationId
++    ? journeyTicks(state, c.locationId, normalizedAction.destinationId)
++    : undefined;
++  const timeCost = normalizedAction.kind === 'travel' && journey
++    ? Math.max(1, journey.ticks)
++    : Math.max(1, Math.min(24, Math.round(normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' || normalizedAction.kind === 'train' ? 2 : 1))));
++  const env = environmentAt(state, c.locationId);
+   const blockedNow = (summary: string, difficulty: number): ActionResolution => ({
+     status: 'blocked', summary, action: normalizedAction, state,
+     events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
+@@ -132,6 +143,19 @@ export function resolveAction(
+     roll, difficulty,
+   });
+ 
++  if (normalizedAction.kind === 'travel' && normalizedAction.destinationId && state.world.map && !journey) {
++    return blockedNow('There is no road from here to there.', DIFFICULTY.travel);
++  }
++  const talkTarget = normalizedAction.kind === 'talk' && normalizedAction.targetId
++    ? state.jianghu?.npcs.find(n => n.id === normalizedAction.targetId)
++    : undefined;
++  if (talkTarget && talkTarget.alive && talkTarget.locationId === c.locationId && env.calendar && isAsleep(talkTarget, env.time.phase)) {
++    return blockedNow(`${talkTarget.name} is asleep.`, DIFFICULTY.talk);
++  }
++  if (talkTarget && talkTarget.alive && talkTarget.locationId !== c.locationId) {
++    return blockedNow(`${talkTarget.name} is not here.`, DIFFICULTY.talk);
++  }
++
+   const duelTarget = normalizedAction.kind === 'attack' && normalizedAction.targetId
+     ? state.jianghu?.npcs.find(n => n.id === normalizedAction.targetId)
+     : undefined;
+@@ -175,28 +199,31 @@ export function resolveAction(
+ 
+   const attackUse: ArtUse | undefined = named ?? (normalizedAction.kind === 'attack' && bestCombatArt(c) ? { art: bestCombatArt(c)! } : undefined);
+   let difficulty = clamp(DIFFICULTY[normalizedAction.kind] + RISK_MODIFIER[normalizedAction.riskPosture ?? normalizedAction.risk] - Math.floor(c.attributes.luck / 5), 5, 95)
+-    + injuryPenalty(c, normalizedAction.kind);
++    + injuryPenalty(c, normalizedAction.kind)
++    + difficultyModifier(normalizedAction.kind, env);
+   let score = roll + Math.floor((c.attributes.perception + c.attributes.agility) / 4);
+   if (duelTarget) {
+     difficulty = duelDifficulty(duelTarget, normalizedAction.riskPosture ?? normalizedAction.risk, c.attributes.luck);
+     score = roll + combatEdge(c, attackUse, duelTarget);
+   }
+   let status: ActionResolution['status'];
++  let travelFrom: string | undefined;
++  let travelTo: string | undefined;
+ 
+   if (normalizedAction.kind === 'rest') {
+     status = 'success';
+-    c.fatigue = clamp(c.fatigue - 25, 0, 100);
+-    const restoredHp = Math.min(c.maxHp - c.hp, Math.max(1, Math.floor(c.maxHp * 0.05)));
++    c.fatigue = clamp(c.fatigue - 12 * timeCost, 0, 100);
++    const restoredHp = Math.min(c.maxHp - c.hp, Math.max(1, Math.ceil(c.maxHp * 0.025 * timeCost)));
+     c.hp += restoredHp;
+     events.push({ type: 'character.hp_changed', causes: ['action:rest'], payload: { amount: restoredHp, reason: 'rest' } });
+     events.push({ type: 'character.fatigue_changed', causes: ['action:rest'], payload: { value: c.fatigue } });
+-    // Rest is how wounds close faster (Bible section 7: recovery).
+-    if (c.wuxia) c.wuxia.injuries = c.wuxia.injuries.map(i => ({ ...i, healingTurns: Math.max(1, i.healingTurns - 1) }));
++    // Rest is how wounds close faster (Bible section 7): it doubles the healing the passing time already gives.
++    if (c.wuxia) c.wuxia.injuries = c.wuxia.injuries.map(i => ({ ...i, healingTurns: Math.max(1, i.healingTurns - timeCost) }));
+   } else if (normalizedAction.kind === 'meditate') {
+     status = 'success';
+     const restoredQi = Math.min(
+       c.maxQi - c.qi,
+-      c.wuxia ? qiRecovery(c as typeof c & { wuxia: NonNullable<typeof c.wuxia> }, Math.max(1, Math.floor(c.maxQi * 0.15))) : Math.max(1, Math.floor(c.maxQi * 0.15)),
++      c.wuxia ? qiRecovery(c as typeof c & { wuxia: NonNullable<typeof c.wuxia> }, Math.max(1, Math.floor(c.maxQi * 0.15 * timeCost))) : Math.max(1, Math.floor(c.maxQi * 0.15 * timeCost)),
+     );
+     c.qi += restoredQi;
+     if (c.wuxia) {
+@@ -256,9 +283,9 @@ export function resolveAction(
+     if (!duelTarget && normalizedAction.kind !== 'train') c.qi -= qiCost;
+     if (qiCost > 0 && !duelTarget && normalizedAction.kind !== 'train') events.push({ type: 'character.qi_changed', causes: [`action:${normalizedAction.kind}`, 'resource:qi'], payload: { amount: -qiCost, reason: normalizedAction.kind } });
+     if (status === 'success' && normalizedAction.kind === 'travel' && normalizedAction.destinationId) {
+-      const from = c.locationId;
+-      c.locationId = normalizedAction.destinationId;
+-      events.push({ type: 'world.location_changed', causes: ['action:travel', `location:${from}`], witnesses: [c.id], payload: { from, to: c.locationId } });
++      // The player is on the road for the whole journey (see the tick loop below) and arrives on its last tick.
++      travelFrom = c.locationId;
++      travelTo = normalizedAction.destinationId;
+     }
+     if (status === 'success' && normalizedAction.kind === 'inspect' && normalizedAction.targetId) {
+       const fact = `inspected:${normalizedAction.targetId}`;
+@@ -267,13 +294,20 @@ export function resolveAction(
+         events.push({ type: 'world.fact_discovered', causes: ['action:inspect', `target:${normalizedAction.targetId}`], witnesses: [c.id], knowledgeConsequences: [`player:fact:${fact}`], payload: { fact } });
+       }
+     }
+-    c.fatigue = clamp(c.fatigue + Math.ceil(timeCost * (normalizedAction.risk === 'high' ? 8 : 4)), 0, 100);
++    // Effort per tick (travel is steadier than a fight), plus whatever the weather adds outdoors.
++    const spent = travelTo ? timeCost : (normalizedAction.kind === 'travel' ? 1 : timeCost);
++    const perTick = normalizedAction.kind === 'travel' ? (normalizedAction.risk === 'high' ? 6 : 3) : (normalizedAction.risk === 'high' ? 8 : 4);
++    const outdoors = normalizedAction.kind === 'travel' ? { ...env, indoors: false } : env;
++    c.fatigue = clamp(c.fatigue + Math.ceil(spent * perTick) + spent * weatherFatigue(outdoors), 0, 100);
+     events.push({ type: 'character.fatigue_changed', payload: { value: c.fatigue } });
+   }
+ 
++  // Time that actually passes: a successful journey takes its full length; a failed attempt costs one tick.
++  const elapsed = normalizedAction.kind === 'travel' && !travelTo ? 1 : timeCost;
++
+   if (c.wuxia && c.wuxia.injuries.length > 0) {
+     c.wuxia.injuries = c.wuxia.injuries
+-      .map(injury => ({ ...injury, healingTurns: Math.max(0, injury.healingTurns - 1) }))
++      .map(injury => ({ ...injury, healingTurns: Math.max(0, injury.healingTurns - elapsed) }))
+       .filter(injury => injury.healingTurns > 0);
+     const synced = syncInjuries(c as typeof c & { wuxia: NonNullable<typeof c.wuxia> });
+     c.conditions = synced.conditions;
+@@ -291,16 +325,23 @@ export function resolveAction(
+     events.push(...interaction.events);
+   }
+ 
+-  state.world.turn += 1;
+-
+-  if (state.jianghu) {
+-    const ticked = tickJianghu(state.jianghu, state);
+-    const v3 = applyCausalityV3(ticked.jianghu, state);
+-    const info = processInformation(v3.jianghu, state);
+-    const chains = advanceCausalChains(info.jianghu, state);
+-    const v5 = advanceCausalityV5(chains.jianghu, state);
+-    state.jianghu = v5.jianghu;
+-    events.push(...ticked.events, ...v3.events, ...info.events, ...chains.events, ...v5.events);
++  // The world moves one tick at a time for as long as the action takes, so a three-day journey is
++  // three days of rumors, NPC errands and slow-burn events, and nobody "sees" what the traveller misses.
++  for (let step = 1; step <= elapsed; step++) {
++    state.world.turn += 1;
++    if (travelTo) c.locationId = step < elapsed ? TRANSIT_LOCATION : travelTo;
++    if (state.jianghu) {
++      const ticked = tickJianghu(state.jianghu, state);
++      const v3 = applyCausalityV3(ticked.jianghu, state);
++      const info = processInformation(v3.jianghu, state);
++      const chains = advanceCausalChains(info.jianghu, state);
++      const v5 = advanceCausalityV5(chains.jianghu, state);
++      state.jianghu = v5.jianghu;
++      events.push(...ticked.events, ...v3.events, ...info.events, ...chains.events, ...v5.events);
++    }
++  }
++  if (travelFrom && travelTo) {
++    events.push({ type: 'world.location_changed', causes: ['action:travel', `location:${travelFrom}`], witnesses: [c.id], payload: { from: travelFrom, to: travelTo, ticks: elapsed, weather: journey?.weather.kind ?? 'clear', delayed: journey?.delayed ?? false } });
+   }
+ 
+   events.push({
+@@ -308,7 +349,7 @@ export function resolveAction(
+     causes: [`action:${normalizedAction.kind}`, `resolution:${status}`],
+     witnesses: [c.id],
+     causalLinks: state.ledger.slice(-3).map(entry => entry.eventId),
+-    payload: { kind: normalizedAction.kind, status, difficulty, roll, score, turn: state.world.turn },
++    payload: { kind: normalizedAction.kind, status, difficulty, roll, score, turn: state.world.turn, ticks: elapsed },
+   });
+ 
+   const summaries: Record<ActionResolution['status'], string> = {
+diff --git a/src/engine/routine.ts b/src/engine/routine.ts
+new file mode 100644
+index 0000000..4e10fc9
+--- /dev/null
++++ b/src/engine/routine.ts
+@@ -0,0 +1,98 @@
++import { PHASES, isDarkPhase, timeOf, type Phase } from './clock';
++import type { JianghuState, NPCState } from './jianghu';
++import type { SimulationState, StateEvent } from './types';
++import { TRANSIT_LOCATION, routeTicks } from './worldMap';
++
++/**
++ * Daily routines, sleep and travel for NPCs (Bible sections 9 and 11). Framework only:
++ * a setting supplies each NPC's `homeId` and `routine` as data; with neither, an NPC
++ * simply sleeps in the small hours and otherwise stays where they are.
++ */
++export type Activity = 'work' | 'sleep' | 'leisure' | 'patrol' | 'worship';
++export interface RoutineEntry { phases: Phase[]; locationId: string; activity?: Activity }
++export interface NpcTransit { from: string; to: string; arriveTurn: number }
++
++const clampNum = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
++
++/** The routine entry in force at this phase, if any (first match wins). */
++export function routineEntry(npc: NPCState, phase: Phase): RoutineEntry | undefined {
++  return npc.routine?.find(e => e.phases.includes(phase));
++}
++
++/** Whether the NPC is asleep right now. An explicit routine wins; otherwise everyone sleeps in the small hours. */
++export function isAsleep(npc: NPCState, phase: Phase): boolean {
++  if (!npc.alive || npc.transit) return false;
++  const entry = routineEntry(npc, phase);
++  if (entry) return entry.activity === 'sleep';
++  if (npc.routine?.some(e => e.phases.includes(phase))) return false;
++  return phase === 'late_night' && !npc.routine;
++}
++
++/** Where the NPC's routine wants them at this phase, or undefined to stay put. */
++export function desiredLocation(npc: NPCState, phase: Phase): string | undefined {
++  const entry = routineEntry(npc, phase);
++  if (entry) return entry.locationId;
++  if (!npc.routine && npc.homeId && isDarkPhase(phase)) return npc.homeId;
++  return undefined;
++}
++
++/** Start an NPC walking somewhere. With no known route they arrive at once; returns the travel time. */
++export function beginNpcTravel(npc: NPCState, to: string, sim: SimulationState): number {
++  const ticks = routeTicks(sim.world.map, npc.locationId, to) ?? 0;
++  if (ticks <= 0) { npc.locationId = to; npc.transit = undefined; return 0; }
++  npc.transit = { from: npc.locationId, to, arriveTurn: sim.world.turn + ticks };
++  npc.locationId = TRANSIT_LOCATION;
++  return ticks;
++}
++
++/**
++ * One tick of NPC movement: arrivals first, then routines for anyone free to follow one.
++ * An NPC pursuing a travel goal is on their own errand and ignores their routine.
++ */
++export function advanceRoutines(j: JianghuState, sim: SimulationState, events: StateEvent[]): void {
++  const turn = sim.world.turn;
++  const phase = timeOf(sim.world).phase;
++  const here = sim.character.locationId;
++  const playerId = sim.character.id;
++  const note = (npc: NPCState, from: string, to: string, arriving: boolean) => {
++    const seen = arriving ? to === here : from === here;
++    events.push({
++      type: 'world.npc_moved',
++      causes: [`npc:${npc.id}:${arriving ? 'arrival' : 'departure'}`],
++      witnesses: seen ? [playerId, npc.id] : [npc.id],
++      knowledgeConsequences: seen ? [`player:saw:${npc.id}:${arriving ? 'arrive' : 'leave'}`] : [],
++      payload: { npcId: npc.id, from, to, arriving, arriveTurn: npc.transit?.arriveTurn ?? turn },
++    });
++  };
++
++  for (const npc of j.npcs) {
++    if (!npc.alive) continue;
++    if (npc.transit) {
++      if (turn >= npc.transit.arriveTurn) {
++        const { from, to } = npc.transit;
++        npc.locationId = to; npc.transit = undefined;
++        note(npc, from, to, true);
++      }
++      continue;
++    }
++    if (npc.goals.some(g => g.active && g.kind === 'travel' && (g.notBefore === undefined || turn >= g.notBefore))) continue;
++    const want = desiredLocation(npc, phase);
++    if (!want || want === npc.locationId) continue;
++    const from = npc.locationId;
++    const ticks = beginNpcTravel(npc, want, sim);
++    note(npc, from, want, ticks === 0);
++  }
++}
++
++/** The first phase, counting forward from `from`, at which this NPC is awake; undefined if they never are. */
++export function nextAwakePhase(npc: NPCState, from: Phase): Phase | undefined {
++  const start = PHASES.indexOf(from);
++  for (let i = 1; i <= PHASES.length; i++) {
++    const phase = PHASES[(start + i) % PHASES.length];
++    if (!isAsleep(npc, phase)) return phase;
++  }
++  return undefined;
++}
++
++export const sleepinessOf = (npc: NPCState, sim: SimulationState): boolean => isAsleep(npc, timeOf(sim.world).phase);
++export const clampTicks = (n: number) => clampNum(Math.round(n), 1, 24);
+diff --git a/src/engine/types.ts b/src/engine/types.ts
+index 6748364..3f520b2 100644
+--- a/src/engine/types.ts
++++ b/src/engine/types.ts
+@@ -61,6 +61,10 @@ export interface SimWorld {
+   knownNpcIds?: string[];
+   /** Saved seed and draw counter for replayable rolls (see rng.ts). Absent on older saves. */
+   rng?: { seed: number; draws: number };
++  /** Calendar for this game; absent on older saves (defaults apply). See clock.ts. */
++  clock?: import('./clock').ClockConfig;
++  /** Roads and place climates; absent means travel is instant and weather is temperate. See worldMap.ts. */
++  map?: import('./worldMap').WorldMap;
+ }
+ 
+ export interface SimulationState {
+@@ -108,6 +112,7 @@ export interface StateEvent {
+     | 'character.mastery_changed'
+     | 'character.combat_resolved'
+     | 'character.defeated'
++    | 'world.npc_moved'
+     | 'character.social_changed'
+     | 'world.location_changed'
+     | 'world.fact_discovered'
+diff --git a/src/engine/validateState.ts b/src/engine/validateState.ts
+index ba3deac..f33b9b6 100644
+--- a/src/engine/validateState.ts
++++ b/src/engine/validateState.ts
+@@ -1,3 +1,5 @@
++import { validClock } from './clock';
++import { validateMap } from './worldMap';
+ import type { SimulationState } from './types';
+ 
+ export type StateValidationIssue = {
+@@ -27,6 +29,12 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
+   if (rng && !(Number.isInteger(rng.seed) && rng.seed >= 0 && rng.seed <= 0xffffffff && Number.isInteger(rng.draws) && rng.draws >= 0)) {
+     issues.push({ path: 'world.rng', message: 'rng must hold an integer 32-bit seed and a non-negative integer draw count.' });
+   }
++  if (state.world.clock && !validClock(state.world.clock)) {
++    issues.push({ path: 'world.clock', message: 'Clock config must have valid season, day and tick values.' });
++  }
++  if (state.world.map) {
++    for (const problem of validateMap(state.world.map, state.world.locationIds)) issues.push({ path: 'world.map', message: problem });
++  }
+   if (!state.world.locationIds.includes(c.locationId)) {
+     issues.push({ path: 'character.locationId', message: 'Current location must exist in world.locationIds.' });
+   }
+diff --git a/src/engine/weather.ts b/src/engine/weather.ts
+new file mode 100644
+index 0000000..ca90cc6
+--- /dev/null
++++ b/src/engine/weather.ts
+@@ -0,0 +1,65 @@
++import { rollAt } from './rng';
++import type { Climate } from './worldMap';
++import type { Season } from './clock';
++
++/**
++ * Deterministic weather (Bible section 11). A pure function of (seed, day, season,
++ * climate): nothing is stored, so replays, saves and tests always agree, and weather
++ * persists for two-day spells instead of flickering every turn. Framework only.
++ */
++export type WeatherKind = 'clear' | 'overcast' | 'rain' | 'storm' | 'fog' | 'snow' | 'blizzard' | 'heat';
++export interface Weather { kind: WeatherKind }
++
++type Table = Array<[WeatherKind, number]>; // weights sum to 100
++const BASE: Record<Season, Table> = {
++  spring: [['clear', 40], ['overcast', 20], ['rain', 28], ['fog', 8], ['storm', 4]],
++  summer: [['clear', 44], ['heat', 14], ['overcast', 12], ['rain', 18], ['storm', 12]],
++  autumn: [['clear', 38], ['overcast', 26], ['rain', 18], ['fog', 14], ['storm', 4]],
++  winter: [['clear', 28], ['overcast', 28], ['snow', 28], ['fog', 8], ['storm', 8]],
++};
++const CLIMATE_SHIFT: Partial<Record<Climate, Partial<Record<Season, Table>>>> = {
++  mountain: { winter: [['snow', 40], ['blizzard', 16], ['clear', 20], ['overcast', 20], ['fog', 4]], autumn: [['clear', 30], ['overcast', 26], ['fog', 18], ['rain', 18], ['snow', 8]] },
++  cold: { winter: [['blizzard', 28], ['snow', 36], ['clear', 20], ['overcast', 16]], autumn: [['clear', 30], ['overcast', 26], ['snow', 24], ['fog', 12], ['storm', 8]] },
++  marsh: { spring: [['fog', 36], ['rain', 28], ['overcast', 20], ['clear', 16]], autumn: [['fog', 40], ['rain', 22], ['overcast', 22], ['clear', 16]], summer: [['heat', 26], ['fog', 24], ['rain', 24], ['clear', 26]] },
++  river: { autumn: [['fog', 26], ['clear', 30], ['overcast', 22], ['rain', 18], ['storm', 4]] },
++};
++
++const CLIMATE_KEY: Record<Climate, number> = { temperate: 1, river: 2, mountain: 3, marsh: 4, cold: 5, forest: 6 };
++
++export function weatherOn(day: number, season: Season, climate: Climate, seed = 0): Weather {
++  const table = CLIMATE_SHIFT[climate]?.[season] ?? BASE[season];
++  const spell = Math.floor(day / 2);
++  const roll = rollAt((seed ^ Math.imul(CLIMATE_KEY[climate], 0x27d4eb2f)) >>> 0, spell);
++  let acc = 0;
++  for (const [kind, weight] of table) { acc += weight; if (roll < acc) return { kind }; }
++  return { kind: table[table.length - 1][0] };
++}
++
++export interface WeatherEffects {
++  /** Multiplier on journey time (rounded up). */
++  travelMultiplier: number;
++  /** Added to the difficulty of the action kind (negative helps). Outdoors only. */
++  difficulty: Partial<Record<'stealth' | 'inspect' | 'travel' | 'attack', number>>;
++  /** Extra fatigue per tick spent outdoors. */
++  fatiguePerTick: number;
++}
++
++const EFFECTS: Record<WeatherKind, WeatherEffects> = {
++  clear: { travelMultiplier: 1, difficulty: {}, fatiguePerTick: 0 },
++  overcast: { travelMultiplier: 1, difficulty: {}, fatiguePerTick: 0 },
++  rain: { travelMultiplier: 1.25, difficulty: { stealth: -5, inspect: 5, travel: 5 }, fatiguePerTick: 1 },
++  storm: { travelMultiplier: 1.5, difficulty: { stealth: -10, inspect: 10, travel: 10, attack: 5 }, fatiguePerTick: 2 },
++  fog: { travelMultiplier: 1.25, difficulty: { stealth: -10, inspect: 10, travel: 5 }, fatiguePerTick: 0 },
++  snow: { travelMultiplier: 1.5, difficulty: { stealth: -5, inspect: 5, travel: 10 }, fatiguePerTick: 1 },
++  blizzard: { travelMultiplier: 2, difficulty: { stealth: -10, inspect: 15, travel: 20, attack: 10 }, fatiguePerTick: 3 },
++  heat: { travelMultiplier: 1.25, difficulty: { travel: 5 }, fatiguePerTick: 2 },
++};
++export const weatherEffects = (w: Weather): WeatherEffects => EFFECTS[w.kind];
++
++const WORDS: Record<WeatherKind, string> = {
++  clear: 'clear skies', overcast: 'an overcast sky', rain: 'steady rain', storm: 'a storm', fog: 'thick fog', snow: 'falling snow', blizzard: 'a howling blizzard', heat: 'oppressive heat',
++};
++export const weatherWord = (w: Weather) => WORDS[w.kind];
++
++/** Darkness helps the sneaking and hinders the looking, outdoors or in. */
++export const NIGHT_EFFECTS = { stealth: -10, inspect: 10, travel: 5 } as const;
+diff --git a/src/engine/worldMap.ts b/src/engine/worldMap.ts
+new file mode 100644
+index 0000000..884419e
+--- /dev/null
++++ b/src/engine/worldMap.ts
+@@ -0,0 +1,47 @@
++/**
++ * The world's roads and places, as plain data inside the simulation state (Bible
++ * section 11: travel takes time). Framework only; a setting supplies the edges.
++ */
++export type Climate = 'temperate' | 'river' | 'mountain' | 'marsh' | 'cold' | 'forest';
++
++export interface MapEdge { a: string; b: string; /** Travel time in ticks (one tick = four hours). */ ticks: number }
++export interface PlaceInfo { climate?: Climate; /** Weather does not touch people indoors. */ indoors?: boolean }
++export interface WorldMap { edges: MapEdge[]; places?: Record<string, PlaceInfo> }
++
++/** The id a character or NPC has while on the road: they are in no place and cannot see or be seen. */
++export const TRANSIT_LOCATION = '__transit__';
++
++/** Shortest travel time between two places, in ticks, or undefined when there is no route. Dijkstra, deterministic. */
++export function routeTicks(map: WorldMap | undefined, from: string, to: string): number | undefined {
++  if (!map) return undefined;
++  if (from === to) return 0;
++  const dist = new Map<string, number>([[from, 0]]);
++  const done = new Set<string>();
++  while (true) {
++    let current: string | undefined; let best = Infinity;
++    for (const [id, d] of dist) if (!done.has(id) && (d < best || (d === best && current !== undefined && id < current))) { best = d; current = id; }
++    if (current === undefined) return undefined;
++    if (current === to) return best;
++    done.add(current);
++    for (const edge of map.edges) {
++      const next = edge.a === current ? edge.b : edge.b === current ? edge.a : undefined;
++      if (next === undefined || done.has(next)) continue;
++      const candidate = best + edge.ticks;
++      if (candidate < (dist.get(next) ?? Infinity)) dist.set(next, candidate);
++    }
++  }
++}
++
++export const climateAt = (map: WorldMap | undefined, id: string): Climate => map?.places?.[id]?.climate ?? 'temperate';
++export const isIndoors = (map: WorldMap | undefined, id: string): boolean => map?.places?.[id]?.indoors ?? false;
++
++export function validateMap(map: WorldMap, locationIds: string[]): string[] {
++  const issues: string[] = [];
++  for (const e of map.edges) {
++    if (!locationIds.includes(e.a) || !locationIds.includes(e.b)) issues.push(`edge ${e.a}-${e.b} names an unknown location`);
++    if (!Number.isInteger(e.ticks) || e.ticks < 1 || e.ticks > 240) issues.push(`edge ${e.a}-${e.b} has an invalid travel time`);
++    if (e.a === e.b) issues.push(`edge ${e.a} loops onto itself`);
++  }
++  for (const id of Object.keys(map.places ?? {})) if (!locationIds.includes(id)) issues.push(`place info for unknown location ${id}`);
++  return issues;
++}
+diff --git a/src/store/gameStore.ts b/src/store/gameStore.ts
+index 74cec09..87579fb 100644
+--- a/src/store/gameStore.ts
++++ b/src/store/gameStore.ts
+@@ -14,6 +14,7 @@ import { buildNarratorDigest } from '../engine/narratorDigest';
+ import { randomSeed } from '../engine/rng';
+ import { fallbackNarration } from '../ai/fallbackNarrator';
+ import { generateChoices, mergeChoices } from '../ai/choiceGenerator';
++import { upgradeWuxiaWorld } from '../world/content';
+ import { FANTASY_PRESETS, buildChoiceContext, buildDigestOptions, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
+ import type { SimulationState } from '../engine/types';
+ 
+@@ -175,6 +176,13 @@ function getDemoResponse(action: string): LLMResponse {
+   };
+ }
+ 
++/** Games saved before the calendar existed get the calendar, roads and routines on their next action. */
++function upgradeLegacyWorld(game: GameState): GameState {
++  const sim = game.simulation;
++  if (!game.character?.originId || !sim || (sim.world.clock && sim.world.map)) return game;
++  return { ...game, simulation: upgradeWuxiaWorld(sim) };
++}
++
+ /**
+  * For a character created from a Wuxia origin, the authored world decides the
+  * start location, simulation state and the five opening choices. The LLM only
+@@ -388,7 +396,7 @@ export const useGameStore = create<GameStore>()(
+ 
+         try {
+           const selectedChoice = gameState.turns[gameState.turns.length - 1]?.choices.find(c => c.id === choiceId);
+-          const prepared = resolvePlayerAction(gameState, choiceText, selectedChoice?.risk ?? 'medium');
++          const prepared = resolvePlayerAction(upgradeLegacyWorld(gameState), choiceText, selectedChoice?.risk ?? 'medium');
+           const resolvedState = prepared.nextGameState;
+           const resolutionContext = gameState.character?.originId
+             ? `[Resolved action]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
+@@ -451,7 +459,7 @@ export const useGameStore = create<GameStore>()(
+         set({ isLoading: true, error: null });
+ 
+         try {
+-          const prepared = resolvePlayerAction(gameState, action, 'medium');
++          const prepared = resolvePlayerAction(upgradeLegacyWorld(gameState), action, 'medium');
+           const resolvedState = prepared.nextGameState;
+           const resolutionContext = gameState.character?.originId
+             ? `[Resolved intent]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
+diff --git a/src/world/content/index.ts b/src/world/content/index.ts
+index b797e2b..32aae85 100644
+--- a/src/world/content/index.ts
++++ b/src/world/content/index.ts
+@@ -2,6 +2,8 @@ import type { SimulationState } from '../../engine/types';
+ import { createDefaultWuxiaCharacter } from '../../engine/wuxia';
+ import { DEFAULT_FANTASY_PRESET, FANTASY_PRESETS, supernaturalEnabled, type FantasyLayerConfig } from './fantasyLayer';
+ import { createWuxiaJianghu, wuxiaLocationIds } from './jianghuSeed';
++import { buildWorldMap } from './locations';
++import { DEFAULT_CLOCK } from '../../engine/clock';
+ import { instantiateArt } from './martialArts';
+ import { ORIGINS, originsFor } from './origins';
+ 
+@@ -57,8 +59,31 @@ export function createWuxiaSimulation(
+       knownRumorIds: [],
+       knownNpcIds: [],
+       rng: { seed: seed >>> 0, draws: 0 },
++      clock: { ...DEFAULT_CLOCK, startTickOfDay: origin.startTickOfDay ?? DEFAULT_CLOCK.startTickOfDay },
++      map: buildWorldMap(supernaturalEnabled(fantasy)),
+     },
+     jianghu: createWuxiaJianghu({ fantasy }),
+     ledger: [],
+   };
+ }
++
++/**
++ * Bring a game saved before the calendar existed up to date: it gets the calendar, the roads and
++ * its NPCs' homes and routines. Idempotent, and it never touches anything the player has changed
++ * (an NPC who already has a home or routine keeps it, so story relocations survive).
++ */
++export function upgradeWuxiaWorld(sim: SimulationState, fantasy: FantasyLayerConfig = FANTASY_PRESETS[DEFAULT_FANTASY_PRESET]): SimulationState {
++  const next: SimulationState = JSON.parse(JSON.stringify(sim));
++  next.world.clock ??= { ...DEFAULT_CLOCK };
++  next.world.map ??= buildWorldMap(supernaturalEnabled(fantasy));
++  const authored = createWuxiaJianghu({ fantasy });
++  for (const npc of next.jianghu?.npcs ?? []) {
++    const seed = authored.npcs.find(n => n.id === npc.id);
++    if (!seed) continue;
++    const unset = npc.homeId === undefined;
++    npc.homeId ??= seed.homeId;
++    // A relocated NPC (home changed by the story) keeps their new life; everyone else gets the authored routine.
++    if (npc.routine === undefined && seed.routine && (unset || npc.homeId === seed.homeId)) npc.routine = seed.routine;
++  }
++  return next;
++}
+diff --git a/src/world/content/jianghuSeed.ts b/src/world/content/jianghuSeed.ts
+index 317271e..63f9802 100644
+--- a/src/world/content/jianghuSeed.ts
++++ b/src/world/content/jianghuSeed.ts
+@@ -145,7 +145,7 @@ export const NPC_PROFILES: NpcProfile[] = [
+   { zh: '蘇眠', fantasy: true, appearance: 'A ferry singer with a river-lamp voice and eyes that catch light like an animal\'s.',
+     voice: 'Playful and oblique; answers in song fragments, never lies outright but never answers straight.',
+     npc: npc({ id: 'npc-su-mian', name: 'Su Mian', role: 'ferry singer', locationId: 'Lantern Ferry',
+-      goals: [goal('goal-return-grove', 'travel', 'Return to Moonwell Grove before the autumn moon', 80, 'Moonwell Grove'), goal('goal-listen', 'investigate', 'Listen for who is hunting the grove', 70)],
++      goals: [{ ...goal('goal-return-grove', 'travel', 'Return to Moonwell Grove before the autumn moon', 80, 'Moonwell Grove'), notBefore: 42, settle: true }, goal('goal-listen', 'investigate', 'Listen for who is hunting the grove', 70)],
+       fears: ['iron bells', 'being recognized'],
+       secrets: ['A fox spirit in human form.', 'Her grove\'s well is being sought by a relic-hunter.'],
+       skills: ['singing', 'Foxfire Illusion Steps', 'listening'], resources: 8 }) },
+@@ -158,6 +158,52 @@ export const NPC_PROFILES: NpcProfile[] = [
+       skills: ['scholarship', 'languages', 'ancient arts'], resources: 15 }) },
+ ];
+ 
++/**
++ * Where each NPC belongs and, where it matters, how their day differs from the default (asleep in
++ * the small hours, otherwise wherever they are). These are replaceable data: the routine engine
++ * knows nothing about them, and an NPC with neither entry simply follows the default.
++ */
++const ROUTINES: Record<string, { home: string; routine?: import('../../engine/routine').RoutineEntry[] }> = {
++  'npc-teahouse-keeper': { home: 'The Crossroads' },
++  'npc-wandering-swordsman': { home: 'The Crossroads' },
++  'npc-yun-shuang': { home: 'Willow Market Town' },
++  'npc-bai-qingshan': { home: 'Jade Hall' },
++  'npc-gu-wen': { home: 'Jade Hall' },
++  // The ferry never closes: Captain Ma works the lantern pier through the night and sleeps by day.
++  'npc-ma-tie': { home: 'Lantern Ferry', routine: [
++    { phases: ['late_night', 'night'], locationId: 'Lantern Ferry', activity: 'work' },
++    { phases: ['dawn', 'morning'], locationId: 'Lantern Ferry', activity: 'sleep' },
++    { phases: ['afternoon', 'evening'], locationId: 'Lantern Ferry', activity: 'work' },
++  ] },
++  'npc-abbot-huiyuan': { home: 'Ninefold Monastery', routine: [
++    { phases: ['dawn'], locationId: 'Ninefold Monastery', activity: 'worship' },
++    { phases: ['late_night'], locationId: 'Ninefold Monastery', activity: 'sleep' },
++    { phases: ['morning', 'afternoon', 'evening', 'night'], locationId: 'Ninefold Monastery', activity: 'work' },
++  ] },
++  'npc-lian-xiaoyue': { home: 'Blackwater Marsh' },
++  // The garrison is always watched.
++  'npc-zhao-rong': { home: 'Frostbell Pass', routine: [
++    { phases: ['late_night'], locationId: 'Frostbell Pass', activity: 'patrol' },
++    { phases: ['dawn', 'morning', 'afternoon', 'evening'], locationId: 'Frostbell Pass', activity: 'work' },
++    { phases: ['night'], locationId: 'Frostbell Pass', activity: 'sleep' },
++  ] },
++  'npc-ah-lin': { home: 'Willow Market Town' },
++  // A ferry singer who sings by night and sleeps through the morning.
++  'npc-su-mian': { home: 'Lantern Ferry', routine: [
++    { phases: ['evening', 'night', 'late_night'], locationId: 'Lantern Ferry', activity: 'leisure' },
++    { phases: ['dawn', 'morning'], locationId: 'Lantern Ferry', activity: 'sleep' },
++    { phases: ['afternoon'], locationId: 'Lantern Ferry', activity: 'leisure' },
++  ] },
++  // The archivist does not sleep.
++  'npc-archivist-mo': { home: 'Sunken Archive', routine: [
++    { phases: ['late_night', 'dawn', 'morning', 'afternoon', 'evening', 'night'], locationId: 'Sunken Archive', activity: 'work' },
++  ] },
++};
++for (const profile of NPC_PROFILES) {
++  const entry = ROUTINES[profile.npc.id];
++  if (entry) { profile.npc.homeId = entry.home; if (entry.routine) profile.npc.routine = entry.routine; }
++}
++
+ for (const profile of NPC_PROFILES) {
+   const combat = COMBAT[profile.npc.id];
+   if (combat) { profile.npc.power = combat.power; profile.npc.arts = [...combat.arts]; }
+diff --git a/src/world/content/locations.ts b/src/world/content/locations.ts
+index eb837f2..d1d6adf 100644
+--- a/src/world/content/locations.ts
++++ b/src/world/content/locations.ts
+@@ -70,6 +70,23 @@ export const TRAVEL_EDGES: TravelEdge[] = [
+   { a: 'Blackwater Marsh', b: 'Sunken Archive', days: 2 },
+ ];
+ 
++/** Climate per place: it shapes the weather the framework deals out there (engine/weather.ts). */
++const CLIMATE: Record<string, import('../../engine/worldMap').Climate> = {
++  'The Crossroads': 'temperate', 'Lantern Ferry': 'river', 'Willow Market Town': 'temperate', 'Jade Hall': 'mountain',
++  'Cloudstep Peak': 'mountain', 'Ninefold Monastery': 'mountain', 'Frostbell Pass': 'cold', 'Blackwater Marsh': 'marsh',
++  'Sunken Archive': 'marsh', 'Moonwell Grove': 'forest',
++};
++
++/** The authored roads as engine data. One travel day is a full day (six four-hour ticks). */
++export function buildWorldMap(includeFantasy: boolean): import('../../engine/worldMap').WorldMap {
++  const places = locationsFor(includeFantasy);
++  const ids = new Set(places.map(l => l.id));
++  return {
++    edges: TRAVEL_EDGES.filter(e => ids.has(e.a) && ids.has(e.b)).map(e => ({ a: e.a, b: e.b, ticks: e.days * 6 })),
++    places: Object.fromEntries(places.map(l => [l.id, { climate: CLIMATE[l.id] ?? 'temperate' }])),
++  };
++}
++
+ export function locationsFor(includeFantasy: boolean): LocationProfile[] {
+   return LOCATIONS.filter(location => includeFantasy || !location.fantasy);
+ }
+diff --git a/src/world/content/origins.ts b/src/world/content/origins.ts
+index b801539..3213175 100644
+--- a/src/world/content/origins.ts
++++ b/src/world/content/origins.ts
+@@ -14,6 +14,8 @@ export interface OriginProfile {
+   zh: string;
+   summary: string;
+   startLocationId: string;
++  /** Tick of day the story opens at (0 small hours, 1 dawn, 2 morning, 3 afternoon, 4 evening, 5 night). */
++  startTickOfDay?: number;
+   attributes: Partial<Record<'strength' | 'agility' | 'constitution' | 'perception' | 'intelligence' | 'charisma' | 'luck', number>>;
+   arts: Array<{ id: string; mastery: number }>;
+   inventory: string[];
+@@ -60,7 +62,7 @@ export const ORIGINS: OriginProfile[] = [
+   {
+     id: 'origin-escort-apprentice', title: 'Escort Apprentice', zh: '鏢局學徒',
+     summary: 'You guard guild caravans with a saber you can barely afford to lose.',
+-    startLocationId: 'Lantern Ferry',
++    startLocationId: 'Lantern Ferry', startTickOfDay: 3,
+     attributes: { constitution: 12, strength: 11 },
+     arts: [{ id: 'art-willow-leaf-saber', mastery: 28 }],
+     inventory: ['saber', 'guild escort token'],
+@@ -76,7 +78,7 @@ export const ORIGINS: OriginProfile[] = [
+   {
+     id: 'origin-ferry-orphan', title: 'Ferry Orphan', zh: '渡口孤兒',
+     summary: 'Raised on the river by people who owed nobody and told you nothing about your parents.',
+-    startLocationId: 'Lantern Ferry',
++    startLocationId: 'Lantern Ferry', startTickOfDay: 4,
+     attributes: { agility: 13, luck: 14, charisma: 11 },
+     arts: [{ id: 'art-swallow-skimming-steps', mastery: 15 }],
+     inventory: ['river knife', 'a child\'s jade charm'],
+diff --git a/test/simulation/ai-fallback.test.ts b/test/simulation/ai-fallback.test.ts
+index 1e22971..bb3d8fd 100644
+--- a/test/simulation/ai-fallback.test.ts
++++ b/test/simulation/ai-fallback.test.ts
+@@ -4,6 +4,8 @@ import { choiceCandidates, generateChoices, isHonourable, mergeChoices } from '.
+ import { fallbackNarration } from '../../src/ai/fallbackNarrator';
+ import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
+ import { resolveAction } from '../../src/engine/resolveAction';
++import { timeOf } from '../../src/engine/clock';
++import { isAsleep } from '../../src/engine/routine';
+ import { validateProposedAction } from '../../src/engine/actionContract';
+ import { validateState } from '../../src/engine/validateState';
+ import {
+@@ -94,13 +96,15 @@ test('the fallback narrator reports what the player perceived: hearsay, travel a
+   assert.ok(talk.includes('Old Tea Keeper tells you what is being said'));
+   assert.ok(talk.includes('cannot yet tell how much of it is true'));
+   const trip = fallbackNarration(resolveAction(sim, interpretPlayerAction('Travel to Lantern Ferry', sim, 'low'), 60), options);
+-  assert.ok(trip.includes('You arrive at Lantern Ferry.'));
++  assert.ok(/you arrive at Lantern Ferry\./.test(trip) && trip.includes('on the road'), trip);
+   const failed = fallbackNarration(resolveAction(sim, interpretPlayerAction('Talk to Old Tea Keeper', sim, 'low'), 5), options);
+   assert.ok(!failed.includes('tells you what is being said'));
+ 
+   let state = createWuxiaSimulation('origin-escort-apprentice'); let finaleText = '';
+-  for (let t = 1; t <= 30 && !finaleText; t++) {
+-    const r = resolveAction(state, interpretPlayerAction(t <= 3 || t >= 16 ? 'Talk to Captain Ma Tie' : 'Rest', state, 'low'), 60);
++  for (let t = 1; t <= 40 && !finaleText; t++) {
++    const ma = state.jianghu!.npcs.find(n => n.id === 'npc-ma-tie')!;
++    const awake = !isAsleep(ma, timeOf(state.world).phase);
++    const r = resolveAction(state, interpretPlayerAction(awake && (state.world.turn <= 9 || state.world.turn >= 15) ? 'Talk to Captain Ma Tie' : 'Rest', state, 'low'), 60);
+     state = r.state;
+     if (r.events.some(e => e.type === 'world.finale_resolved')) finaleText = fallbackNarration(r, options);
+   }
+diff --git a/test/simulation/architecture.test.ts b/test/simulation/architecture.test.ts
+new file mode 100644
+index 0000000..8b366f3
+--- /dev/null
++++ b/test/simulation/architecture.test.ts
+@@ -0,0 +1,55 @@
++import assert from 'node:assert/strict';
++import { readFileSync, readdirSync } from 'node:fs';
++import { dirname, join } from 'node:path';
++import { fileURLToPath } from 'node:url';
++import test from 'node:test';
++import { ARTS_BY_ID, FACTIONS, LOCATIONS, NPC_PROFILES, ORIGINS, RUMORS, WORLD_EVENTS } from '../../src/world/content';
++
++/**
++ * Framework vs content. The engine and the AI boundary are the framework: they know the rules of
++ * time, travel, combat, knowledge and consequence, and nothing about any particular story. Anything
++ * a particular story contains (its places, people, factions, arts, plots) lives in `src/world/content`
++ * as replaceable data, and what happens in a game comes from what the player decides. These tests
++ * make that split a build failure instead of a convention.
++ */
++const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src');
++const sources = (dir: string) => readdirSync(join(root, dir)).filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts')).map(f => ({ file: `${dir}/${f}`, text: readFileSync(join(root, dir, f), 'utf8') }));
++const framework = [...sources('engine'), ...sources('ai')];
++const importsOf = (text: string) => [...text.matchAll(/^\s*(?:import|export)\s[^;]*?from\s+['"]([^'"]+)['"]/gm)].map(m => m[1]);
++
++test('the framework never imports content, UI, state stores or network services', () => {
++  const forbidden = [/world\//, /\/store\//, /\/services\//, /\/components\//, /^react/, /^zustand/, /^lucide/];
++  for (const { file, text } of framework) {
++    for (const spec of importsOf(text)) {
++      for (const bad of forbidden) assert.ok(!bad.test(spec), `${file} imports ${spec}`);
++    }
++    assert.ok(!/\b(localStorage|sessionStorage|fetch\(|window\.|document\.)/.test(text), `${file} touches the platform`);
++  }
++});
++
++test('the framework does not randomise on its own: no Math.random or clock reads inside the engine', () => {
++  for (const { file, text } of sources('engine')) {
++    if (file.endsWith('/rng.ts')) { assert.ok(text.includes('Math.random'), 'the only entropy source is rng.randomSeed'); continue; }
++    assert.ok(!/Math\.random|Date\.now|new Date\(/.test(text), file);
++  }
++});
++
++test('no authored place, person, faction, art or plot id appears in the framework (the legacy default world in jianghu.ts is the one known exception)', () => {
++  const ids = new Set<string>([
++    ...LOCATIONS.map(l => l.id), ...NPC_PROFILES.map(p => p.npc.id), ...FACTIONS.map(f => f.id), ...Object.keys(ARTS_BY_ID),
++    ...ORIGINS.map(o => o.id), ...RUMORS.map(r => r.id), ...WORLD_EVENTS.map(e => e.id),
++  ]);
++  for (const { file, text } of framework) {
++    if (file === 'engine/jianghu.ts') continue; // createDefaultJianghu: a tiny placeholder world for legacy games, to be retired
++    for (const id of ids) assert.ok(!text.includes(`'${id}'`) && !text.includes(`"${id}"`), `${file} hard-codes authored id ${id}`);
++  }
++});
++
++test('content depends only on the engine\'s data types, never on the store, services, components or the AI layer', () => {
++  const dir = join(root, 'world', 'content');
++  for (const f of readdirSync(dir).filter(n => n.endsWith('.ts'))) {
++    for (const spec of importsOf(readFileSync(join(dir, f), 'utf8'))) {
++      assert.ok(!/\/store\/|\/services\/|\/components\/|\/ai\/|^react|^zustand/.test(spec), `${f} imports ${spec}`);
++    }
++  }
++});
+diff --git a/test/simulation/combat.test.ts b/test/simulation/combat.test.ts
+index c015375..c6c13b6 100644
+--- a/test/simulation/combat.test.ts
++++ b/test/simulation/combat.test.ts
+@@ -118,7 +118,7 @@ test('injuries matter: arms handicap fighting, legs handicap travel, internal wo
+   assert.ok(qiRecovery(hurt, 40) < qiRecovery(base, 40));
+   const resting = disciple(); resting.character.wuxia!.injuries.push({ id: 'w', severity: 1, bodyRegion: 'torso', healingTurns: 10, untreated: true });
+   const after = run(resting, 'Rest', 60).state.character.wuxia!.injuries[0];
+-  assert.equal(after.healingTurns, 8); // one extra turn faster than waiting
++  assert.equal(after.healingTurns, 6); // rest takes two ticks; time heals two and rest doubles it
+ });
+ 
+ test('practice raises mastery with diminishing returns, costs Qi, and unlocks locked techniques over time', () => {
+diff --git a/test/simulation/finale.test.ts b/test/simulation/finale.test.ts
+index 78330ff..815bbae 100644
+--- a/test/simulation/finale.test.ts
++++ b/test/simulation/finale.test.ts
+@@ -5,6 +5,8 @@ import { applyFinale, conditionHolds, selectFinaleOutcome, validateFinaleSpec, t
+ import { advanceCausalChains } from '../../src/engine/jianghuInformationV4';
+ import { buildNarratorDigest } from '../../src/engine/narratorDigest';
+ import { resolveAction } from '../../src/engine/resolveAction';
++import { timeOf } from '../../src/engine/clock';
++import { isAsleep } from '../../src/engine/routine';
+ import type { SimulationState } from '../../src/engine/types';
+ import { validateState } from '../../src/engine/validateState';
+ import {
+@@ -97,8 +99,11 @@ test('a player who earned trust and is present changes the outcome, and witnesse
+   // builds (goodwill decays over the middle stages), so trust has to be maintained, not just earned once.
+   let state = createWuxiaSimulation('origin-escort-apprentice');
+   let finale: Record<string, string | number | boolean | null> | undefined; let digest = '';
+-  for (let t = 1; t <= 30 && !finale; t++) {
+-    const text = t <= 3 || t >= 16 ? 'Talk to Captain Ma Tie' : 'Rest';
++  for (let t = 1; t <= 40 && !finale; t++) {
++    // Captain Ma sleeps through the morning, so talk only when he is up.
++    const ma = state.jianghu!.npcs.find(n => n.id === 'npc-ma-tie')!;
++    const awake = !isAsleep(ma, timeOf(state.world).phase);
++    const text = awake && (state.world.turn <= 9 || state.world.turn >= 15) ? 'Talk to Captain Ma Tie' : 'Rest';
+     const r = resolveAction(state, interpretPlayerAction(text, state, 'low'), 60); state = r.state;
+     const e = r.events.find(ev => ev.type === 'world.finale_resolved' && ev.payload.eventId === 'event-toll-dispute');
+     if (e) { finale = e.payload; digest = buildNarratorDigest(r, options); }
+diff --git a/test/simulation/pacing.test.ts b/test/simulation/pacing.test.ts
+index 7aef982..4677c4f 100644
+--- a/test/simulation/pacing.test.ts
++++ b/test/simulation/pacing.test.ts
+@@ -88,22 +88,22 @@ test('faction tension no longer drains every turn: it holds during an active eve
+   assert.equal(cur.factions.find(f => f.id === 'faction-jade-hall')!.internalTension, 36);
+ });
+ 
+-test('authored seed events unfold on their authored timescale and stay valid for 70 turns', () => {
++test('authored seed events unfold on their authored timescale and stay valid for 70 ticks', () => {
+   let state = createWuxiaSimulation('origin-disgraced-disciple');
+   const completed: Record<string, number> = {}; const firstStage: Record<string, number> = {};
+-  for (let t = 1; t <= 70; t++) {
+-    const action = interpretPlayerAction(t % 3 ? 'Rest' : 'Meditate quietly', state, 'low');
++  for (let i = 0; state.world.turn < 70 && i < 200; i++) {
++    const action = interpretPlayerAction(i % 3 ? 'Rest' : 'Meditate quietly', state, 'low');
+     const r = resolveAction(state, action, 60);
+     for (const e of r.events) {
+       const id = String(e.payload.rootEventId);
+-      if (e.type === 'world.causal_chain_advanced') firstStage[id] ??= t;
+-      if (e.type === 'world.causal_chain_completed') completed[id] = t;
++      if (e.type === 'world.causal_chain_advanced') firstStage[id] ??= r.state.world.turn;
++      if (e.type === 'world.causal_chain_completed') completed[id] = r.state.world.turn;
+     }
+     state = r.state;
+-    assert.deepStrictEqual(validateState(state), [], `turn ${t}`);
++    assert.deepStrictEqual(validateState(state), [], `tick ${state.world.turn}`);
+     for (const f of state.jianghu!.factions) assert.ok(f.internalTension >= 0 && f.internalTension <= 100);
+   }
+-  assert.ok(firstStage['event-toll-dispute'] >= 4, 'toll dispute should not escalate in the first few turns');
++  assert.ok(firstStage['event-toll-dispute'] >= 4, 'toll dispute should not escalate in the first few ticks');
+   assert.ok(completed['event-toll-dispute'] >= 16, `toll dispute resolved too fast: ${completed['event-toll-dispute']}`);
+   assert.ok(completed['event-autumn-assembly'] >= 40, `assembly resolved too fast: ${completed['event-autumn-assembly']}`);
+   assert.ok(state.jianghu!.factions.find(f => f.id === 'faction-jade-hall')!.internalTension > 25, 'Jade Hall tension should persist');
+diff --git a/test/simulation/time-model.test.ts b/test/simulation/time-model.test.ts
+new file mode 100644
+index 0000000..7de2728
+--- /dev/null
++++ b/test/simulation/time-model.test.ts
+@@ -0,0 +1,424 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { resolvePlayerAction } from '../../src/engine/actionPipeline';
++import { choiceCandidates, generateChoices, isHonourable } from '../../src/ai/choiceGenerator';
++import { fallbackNarration } from '../../src/ai/fallbackNarrator';
++import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
++import { DEFAULT_CLOCK, TICKS_PER_DAY, describeDuration, describeTime, ticksUntilPhase, timeAt, timeOf, validClock } from '../../src/engine/clock';
++import { journeyTicks } from '../../src/engine/environment';
++import { buildNarratorDigest } from '../../src/engine/narratorDigest';
++import { resolveAction } from '../../src/engine/resolveAction';
++import { isAsleep, nextAwakePhase } from '../../src/engine/routine';
++import type { SimulationState } from '../../src/engine/types';
++import { validateState } from '../../src/engine/validateState';
++import { weatherOn } from '../../src/engine/weather';
++import { TRANSIT_LOCATION, routeTicks } from '../../src/engine/worldMap';
++import type { GameState } from '../../src/types/game';
++import {
++  FANTASY_PRESETS, LOCATIONS, NPC_PROFILES, TRAVEL_EDGES, buildChoiceContext, buildDigestOptions, buildWorldMap,
++  createOriginCharacter, createWuxiaSimulation, findOrigin, upgradeWuxiaWorld,
++} from '../../src/world/content';
++
++const options = buildDigestOptions();
++const ctx = buildChoiceContext();
++const disciple = () => createWuxiaSimulation('origin-disgraced-disciple'); // The Crossroads, morning of day 12, autumn
++const run = (sim: SimulationState, text: string, roll = 60, risk: 'low' | 'medium' | 'high' = 'low') => resolveAction(sim, interpretPlayerAction(text, sim, risk), roll);
++const npc = (sim: SimulationState, id: string) => sim.jianghu!.npcs.find(n => n.id === id)!;
++const atTick = (sim: SimulationState, tickOfDay: number) => { const s = JSON.parse(JSON.stringify(sim)) as SimulationState; s.world.turn = tickOfDay - sim.world.clock!.startTickOfDay + TICKS_PER_DAY * 3; return s; };
++
++test('the clock is derived from one counter: phases, dates, seasons and years roll over correctly', () => {
++  assert.deepStrictEqual(timeAt(0).phase, 'morning');
++  assert.equal(describeTime(timeAt(0)), 'Morning, day 12 of autumn');
++  const phases = Array.from({ length: 6 }, (_, i) => timeAt(i).phase);
++  assert.deepStrictEqual(phases, ['morning', 'afternoon', 'evening', 'night', 'late_night', 'dawn']);
++  assert.equal(timeAt(4).isNight && timeAt(3).isNight && !timeAt(0).isNight, true);
++  assert.equal(timeAt(0).season, 'autumn');
++  assert.equal(timeAt(19 * TICKS_PER_DAY).season, 'winter'); // day 12 + 19 = day 31
++  assert.equal(timeAt(19 * TICKS_PER_DAY).dayOfSeason, 1);
++  const yearTwo = timeAt(100 * TICKS_PER_DAY);
++  assert.deepStrictEqual([yearTwo.season, yearTwo.dayOfSeason, yearTwo.year], ['summer', 22, 1]);
++  for (let t = 0; t < 2000; t += 7) { const w = timeAt(t); assert.ok(w.dayOfSeason >= 1 && w.dayOfSeason <= 30 && w.tickOfDay >= 0 && w.tickOfDay < 6); }
++  assert.equal(timeAt(-5).tick, 0);
++  assert.equal(ticksUntilPhase({ turn: 0 }, 'dawn'), 5);
++  assert.equal(ticksUntilPhase({ turn: 0 }, 'morning'), 6, 'a full day when it is already that phase');
++  assert.ok(validClock(DEFAULT_CLOCK));
++  for (const bad of [{ ...DEFAULT_CLOCK, daysPerSeason: 0 }, { ...DEFAULT_CLOCK, startDayOfSeason: 31 }, { ...DEFAULT_CLOCK, startTickOfDay: 6 }, { ...DEFAULT_CLOCK, startSeason: 'monsoon' as never }]) assert.equal(validClock(bad), false);
++});
++
++test('durations are put into plain words', () => {
++  assert.deepStrictEqual([1, 3, 6, 9, 12, 14, 17].map(describeDuration), ['about 4 hours', 'about 12 hours', 'a day', 'a day and a half', 'two days', 'a little over two days', 'nearly three days']);
++  assert.equal(describeDuration(0), 'no time at all');
++});
++
++test('the authored map becomes engine data: symmetric routes, triangle inequality, real distances', () => {
++  const map = buildWorldMap(true);
++  const ids = LOCATIONS.map(l => l.id);
++  for (const a of ids) for (const b of ids) {
++    const d = routeTicks(map, a, b);
++    assert.ok(d !== undefined, `${a} -> ${b}`);
++    assert.equal(d, routeTicks(map, b, a));
++    for (const via of ids) assert.ok(d <= routeTicks(map, a, via)! + routeTicks(map, via, b)!, `${a}-${via}-${b}`);
++  }
++  assert.equal(routeTicks(map, 'The Crossroads', 'Lantern Ferry'), 6);
++  assert.equal(routeTicks(map, 'The Crossroads', 'Moonwell Grove'), 30);
++  assert.equal(routeTicks(map, 'The Crossroads', 'The Crossroads'), 0);
++  assert.equal(routeTicks(map, 'The Crossroads', 'Nowhere'), undefined);
++  assert.equal(routeTicks(undefined, 'a', 'b'), undefined);
++  assert.equal(TRAVEL_EDGES.length, map.edges.length);
++  assert.ok(!buildWorldMap(false).edges.some(e => [e.a, e.b].some(id => id === 'Moonwell Grove' || id === 'Sunken Archive')));
++});
++
++test('weather is a pure function of (seed, day, season, climate), lasts in spells, and fits the climate', () => {
++  for (const season of ['spring', 'summer', 'autumn', 'winter'] as const) for (const climate of ['temperate', 'mountain', 'marsh', 'cold', 'river', 'forest'] as const) {
++    for (let day = 0; day < 40; day++) assert.equal(weatherOn(day, season, climate, 77).kind, weatherOn(day, season, climate, 77).kind);
++  }
++  assert.equal(weatherOn(40, 'autumn', 'river', 9).kind, weatherOn(41, 'autumn', 'river', 9).kind, 'two-day spells');
++  const tally = (season: 'summer' | 'winter', climate: 'temperate' | 'cold') => {
++    const t: Record<string, number> = {};
++    for (let day = 0; day < 4000; day += 2) { const k = weatherOn(day, season, climate, 5).kind; t[k] = (t[k] ?? 0) + 1; }
++    return t;
++  };
++  assert.equal(tally('summer', 'temperate').snow ?? 0, 0);
++  assert.equal(tally('summer', 'temperate').blizzard ?? 0, 0);
++  assert.ok((tally('winter', 'cold').blizzard ?? 0) > (tally('winter', 'temperate').blizzard ?? 0));
++  assert.ok((tally('winter', 'cold').snow ?? 0) > 400);
++  const seeds = new Set(Array.from({ length: 40 }, (_, seed) => weatherOn(10, 'autumn', 'temperate', seed).kind));
++  assert.ok(seeds.size >= 3, 'different seeds give different skies');
++});
++
++test('journeys follow the map and are stretched by bad weather; a mapless world stays instant', () => {
++  const sim = disciple();
++  const clear = { ...sim, world: { ...sim.world } };
++  const trip = journeyTicks(clear, 'The Crossroads', 'Lantern Ferry')!;
++  assert.equal(trip.baseTicks, 6);
++  assert.ok(trip.ticks >= 6 && trip.ticks <= 12);
++  assert.equal(trip.delayed, trip.ticks > 6);
++  // Find a day whose weather slows the road, and one that does not, by sweeping the calendar.
++  const seen = new Set<number>();
++  for (let day = 0; day < 120; day += 2) { const s = atTick(sim, 2); s.world.turn = day * 6; seen.add(journeyTicks(s, 'The Crossroads', 'Lantern Ferry')!.ticks); }
++  assert.ok(seen.has(6) && [...seen].some(t => t > 6), `ticks seen: ${[...seen]}`);
++  const bare = { world: { turn: 0, locationIds: ['a', 'b'], knownFacts: [] } };
++  assert.equal(journeyTicks(bare, 'a', 'b')!.ticks, 1);
++});
++
++test('travel takes exactly the journey time: the clock moves, the player is on the road, then arrives', () => {
++  const sim = disciple();
++  const trip = journeyTicks(sim, 'The Crossroads', 'Lantern Ferry')!;
++  const r = run(sim, 'Travel to Lantern Ferry', 95);
++  assert.equal(r.status, 'success');
++  assert.equal(r.state.world.turn - sim.world.turn, trip.ticks);
++  assert.equal(r.state.character.locationId, 'Lantern Ferry');
++  const moved = r.events.find(e => e.type === 'world.location_changed')!;
++  assert.equal(moved.payload.ticks, trip.ticks);
++  assert.deepStrictEqual(validateState(r.state), []);
++  const digest = buildNarratorDigest(r, options);
++  assert.ok(digest.includes('The journey took'));
++  assert.ok(/Time: (Dawn|Morning|Afternoon|Evening|Night|The small hours), day \d+ of autumn\./.test(digest));
++  assert.ok(/you arrive at Lantern Ferry/i.test(fallbackNarration(r, options)));
++});
++
++test('a failed journey costs one tick and leaves you where you were', () => {
++  const sim = disciple();
++  const r = run(sim, 'Travel to Lantern Ferry', 1, 'high');
++  assert.notEqual(r.status, 'success');
++  assert.equal(r.state.character.locationId, 'The Crossroads');
++  assert.equal(r.state.world.turn - sim.world.turn, 1);
++});
++
++test('travel with no road on a mapped world is blocked and costs no time', () => {
++  const sim = disciple();
++  sim.world.locationIds.push('Island');
++  sim.world.map!.places!['Island'] = {};
++  const r = run(sim, 'Travel to Island', 95);
++  assert.equal(r.status, 'blocked');
++  assert.match(r.summary, /no road/);
++  assert.equal(r.state.world.turn, sim.world.turn);
++});
++
++test('while travelling you are nowhere: a finale at the destination is not witnessed and nothing is learned', () => {
++  const sim = disciple();
++  sim.jianghu!.worldEvents.push({
++    id: 'event-test-ferry', kind: 'political', title: 'Ferry meeting', description: 'A meeting at the ferry.', locationId: 'Lantern Ferry',
++    factionIds: [], severity: 2, active: true, createdTurn: 0, pace: { steps: 1, interval: 2 },
++    finale: { outcomes: [{ id: 'done', headline: 'The meeting breaks up.', description: 'People drift away.', when: [], effects: [
++      { kind: 'spread_rumor', id: 'rumor-test-meeting', text: 'The ferry meeting broke up.', origin: 'npc-ma-tie', locationIds: ['Lantern Ferry'], credibility: 80 }] }] },
++  });
++  const r = run(sim, 'Travel to Lantern Ferry', 95);
++  const finale = r.events.find(e => e.type === 'world.finale_resolved');
++  assert.ok(finale, 'the finale happens during the journey');
++  assert.equal(finale.payload.witnessedByPlayer, false);
++  assert.deepStrictEqual(finale.witnesses, []);
++  assert.ok(!r.state.jianghu!.knowledgeRecords!.some(k => k.sourceId === 'event-test-ferry'));
++  assert.ok(!buildNarratorDigest(r, options).includes('The meeting breaks up'));
++  assert.ok(!r.state.world.knownRumorIds!.includes('rumor-test-meeting-lantern-ferry'));
++});
++
++test('time passes during a journey: the world ticks every step, and no tick sees the player at a place they have not reached', () => {
++  const sim = disciple();
++  const r = run(sim, 'Travel to Moonwell Grove', 95);
++  assert.equal(r.status, 'success');
++  assert.ok(r.state.world.turn - sim.world.turn >= 30);
++  const ticks = r.events.filter(e => e.type === 'world.jianghu_ticked');
++  assert.equal(ticks.length, r.state.world.turn - sim.world.turn);
++  assert.equal(r.state.character.locationId, 'Moonwell Grove');
++  assert.ok(r.state.jianghu!.markets!.every(m => m.locationId !== TRANSIT_LOCATION), 'no market grows on the road');
++  assert.deepStrictEqual(validateState(r.state), []);
++});
++
++test('sleep: people are asleep in the small hours by default, explicit routines override, and the sleeping cannot be talked to', () => {
++  const sim = disciple();
++  const keeper = npc(sim, 'npc-teahouse-keeper'); const ma = npc(sim, 'npc-ma-tie'); const mo = npc(sim, 'npc-archivist-mo');
++  assert.equal(isAsleep(keeper, 'late_night'), true);
++  assert.equal(isAsleep(keeper, 'morning'), false);
++  assert.equal(isAsleep(ma, 'morning'), true, 'Captain Ma sleeps by day');
++  assert.equal(isAsleep(ma, 'late_night'), false, 'and works the pier at night');
++  assert.equal(isAsleep(mo, 'late_night'), false, 'the archivist never sleeps');
++  assert.deepStrictEqual(['dawn', 'morning', 'afternoon', 'evening', 'night'].map(p => isAsleep(keeper, p as never)), [false, false, false, false, false]);
++  assert.equal(nextAwakePhase(ma, 'dawn'), 'afternoon');
++  assert.equal(nextAwakePhase(keeper, 'late_night'), 'dawn');
++  const night = atTick(sim, 0);
++  const blocked = run(night, 'Talk to Old Tea Keeper');
++  assert.equal(blocked.status, 'blocked');
++  assert.match(blocked.summary, /is asleep/);
++  assert.equal(blocked.state.world.turn, night.world.turn, 'a blocked action takes no time');
++  assert.ok(buildNarratorDigest(blocked, options).includes('The action did not happen: Old Tea Keeper is asleep.'));
++  assert.ok(fallbackNarration(blocked, options).includes('No time passes.'));
++  assert.ok(buildNarratorDigest(blocked, options).includes('Old Tea Keeper (tea house keeper) [asleep]'));
++});
++
++test('the sleeping can be waited for: rest until they wake, then the conversation works', () => {
++  const ferry = createWuxiaSimulation('origin-escort-apprentice');
++  const morning = atTick(ferry, 2);
++  assert.equal(run(morning, 'Talk to Captain Ma Tie').status, 'blocked');
++  const waited = run(morning, 'Rest until afternoon');
++  assert.equal(waited.state.world.turn - morning.world.turn, 1);
++  assert.equal(timeOf(waited.state.world).phase, 'afternoon');
++  assert.equal(run(waited.state, 'Talk to Captain Ma Tie', 60).status, 'success');
++});
++
++test('a person who is somewhere else cannot be talked to, whatever the clock says', () => {
++  const r = run(disciple(), 'Talk to Captain Ma Tie', 95);
++  assert.equal(r.status, 'blocked');
++  assert.match(r.summary, /not here/);
++});
++
++test('players say how long, in their own words: until a time, overnight, for a span, and bounded', () => {
++  const sim = disciple(); // morning
++  const ticks = (text: string) => interpretPlayerAction(text, sim).timeCost;
++  assert.equal(ticks('Rest until dawn'), 5);
++  assert.equal(ticks('Wait until evening'), 2);
++  assert.equal(ticks('Sleep overnight'), 5);
++  assert.equal(ticks('Rest through the night'), 5);
++  assert.equal(ticks('Rest for two days'), 12);
++  assert.equal(ticks('Wait for a watch'), 1);
++  assert.equal(ticks('Rest for a day'), 6);
++  assert.equal(ticks('Meditate until midnight'), 4);
++  assert.equal(ticks('Rest for 40 days'), 24, 'capped at four days');
++  assert.equal(ticks('Rest'), undefined, 'no duration named keeps the default');
++  assert.equal(run(sim, 'Rest').state.world.turn - sim.world.turn, 2);
++  assert.equal(run(sim, 'Meditate quietly').state.world.turn - sim.world.turn, 1);
++  for (const t of ['Talk to Old Tea Keeper', 'Inspect the notice wall']) assert.equal(interpretPlayerAction(t, sim).timeCost, undefined);
++});
++
++test('words that merely contain a keyword no longer change what you meant (forest, camphor, interest)', () => {
++  const sim = disciple();
++  for (const [text, kind] of [['Inspect the camphor tree shrine', 'inspect'], ['Look at the forest edge', 'inspect'], ['Ask about the crest on the gate', 'talk'], ['Examine the interesting carving', 'inspect']] as const) {
++    assert.equal(interpretPlayerAction(text, sim).kind, kind, text);
++  }
++  assert.equal(interpretPlayerAction('Make camp for the night', sim).kind, 'rest');
++  assert.equal(interpretPlayerAction('Rest by the fire', sim).kind, 'rest');
++});
++
++test('rest scales with the time spent: a long rest heals and refreshes more, and wounds close with the days', () => {
++  const sim = disciple(); sim.character.hp = 40; sim.character.fatigue = 90;
++  sim.character.wuxia!.injuries.push({ id: 'w', severity: 2, bodyRegion: 'torso', healingTurns: 14, untreated: true });
++  const short = run(sim, 'Rest for a watch'); const long = run(sim, 'Rest for two days');
++  assert.ok(long.state.character.hp > short.state.character.hp);
++  assert.ok(long.state.character.fatigue < short.state.character.fatigue);
++  assert.equal(long.state.character.fatigue, 0);
++  assert.equal(long.state.character.wuxia!.injuries.length, 0, 'two days of rest closes a fresh wound');
++  assert.equal(short.state.character.wuxia!.injuries.length, 1);
++  const med = run(disciple(), 'Meditate until midnight');
++  assert.ok(med.state.character.qi >= disciple().character.qi);
++});
++
++test('long journeys tire you far more than short ones, and a storm tires you more than a clear day', () => {
++  const sim = disciple();
++  const short = run(sim, 'Travel to Lantern Ferry', 95); const long = run(sim, 'Travel to Moonwell Grove', 95);
++  assert.ok(long.state.character.fatigue > short.state.character.fatigue);
++  assert.ok(long.state.character.fatigue <= 100);
++});
++
++test('darkness helps the sneaking and hinders the looking; talking is unaffected (weather removed by staying indoors)', () => {
++  const base = disciple(); base.world.map!.places!['The Crossroads'].indoors = true;
++  const at = (text: string, tickOfDay: number) => run(atTick(base, tickOfDay), text, 60, 'medium').difficulty;
++  assert.equal(at('Sneak past the tea house', 5) - at('Sneak past the tea house', 2), -10);
++  assert.equal(at('Inspect the notice wall', 5) - at('Inspect the notice wall', 2), 10);
++  assert.equal(at('Talk to Old Tea Keeper', 5), at('Talk to Old Tea Keeper', 2));
++});
++
++test('weather changes the difficulty outdoors and not indoors', () => {
++  const sim = disciple();
++  let found = false;
++  for (let day = 0; day < 200 && !found; day++) {
++    const s = atTick(sim, 2); s.world.turn = day * 6;
++    const w = weatherOn(timeOf(s.world).day, timeOf(s.world).season, 'temperate', s.world.rng!.seed).kind;
++    if (w !== 'storm' && w !== 'fog') continue;
++    const outdoors = run(s, 'Inspect the notice wall', 60, 'medium').difficulty;
++    const inside = JSON.parse(JSON.stringify(s)) as SimulationState; inside.world.map!.places!['The Crossroads'].indoors = true;
++    const sheltered = run(inside, 'Inspect the notice wall', 60, 'medium').difficulty;
++    assert.equal(outdoors - sheltered, 10, `${w}`);
++    found = true;
++  }
++  assert.ok(found, 'a stormy or foggy day exists in 200 days');
++});
++
++test('worlds without a calendar (older saves, bare fixtures) feel no day, night or weather', () => {
++  const sim = disciple(); delete sim.world.clock;
++  const diffs = new Set<number>(); let allowed = true;
++  for (let tick = 0; tick < 36; tick++) {
++    const s = JSON.parse(JSON.stringify(sim)) as SimulationState; s.world.turn = tick;
++    diffs.add(run(s, 'Inspect the notice wall', 60, 'medium').difficulty);
++    allowed = allowed && run(s, 'Talk to Captain Ma Tie').status !== undefined && run(s, 'Talk to Old Tea Keeper').status !== 'blocked';
++  }
++  assert.equal(diffs.size, 1);
++  assert.ok(allowed, 'nobody is asleep in a world with no calendar');
++});
++
++test('NPCs with no routine do not wander: the old teleporting is gone', () => {
++  let sim = disciple();
++  const where = (id: string) => npc(sim, id).locationId;
++  const before = { gu: where('npc-gu-wen'), bai: where('npc-bai-qingshan'), zhao: where('npc-zhao-rong'), mian: where('npc-su-mian') };
++  for (let i = 0; i < 12; i++) sim = run(sim, 'Rest for a day').state; // 72 ticks, player never leaves the crossroads
++  assert.equal(where('npc-bai-qingshan'), before.bai);
++  assert.equal(where('npc-zhao-rong'), before.zhao);
++  assert.equal(where('npc-wandering-swordsman'), 'The Crossroads');
++  void before.gu; void before.mian;
++});
++
++test('NPC errands take real time: Su Mian sets out when her goal opens, is on the road, then arrives and settles there', () => {
++  let sim = createWuxiaSimulation('origin-ferry-orphan');
++  const moves: Array<{ tick: number; arriving: boolean; seen: boolean }> = [];
++  for (let i = 0; i < 120 && sim.world.turn < 100; i++) {
++    const r = run(sim, 'Wait for a watch');
++    for (const e of r.events) if (e.type === 'world.npc_moved' && e.payload.npcId === 'npc-su-mian') moves.push({ tick: r.state.world.turn, arriving: e.payload.arriving === true, seen: e.witnesses!.includes('player') });
++    sim = r.state;
++    const su = npc(sim, 'npc-su-mian');
++    if (su.transit) { assert.equal(su.locationId, TRANSIT_LOCATION); assert.ok(!buildNarratorDigest(r, options).includes('Su Mian (ferry singer)'), 'not visible on the road'); }
++    assert.deepStrictEqual(validateState(sim), []);
++  }
++  assert.equal(moves[0].arriving, false);
++  assert.ok(moves[0].tick >= 42, `she waits for her goal to open: ${moves[0].tick}`);
++  assert.equal(moves[0].seen, true, 'the player at the ferry sees her leave');
++  assert.equal(moves[1].arriving, true);
++  assert.ok(moves[1].tick - moves[0].tick >= 30, 'the journey takes days');
++  assert.equal(moves[1].seen, false, 'and the arrival is not witnessed from afar');
++  const su = npc(sim, 'npc-su-mian');
++  assert.equal(su.locationId, 'Moonwell Grove');
++  assert.equal(su.homeId, 'Moonwell Grove');
++  assert.equal(su.routine, undefined);
++  assert.equal(moves.length, 2, 'settled: she does not commute back');
++});
++
++test('the digest tells the narrator who arrives and who leaves, only when the player could see it', () => {
++  let sim = createWuxiaSimulation('origin-ferry-orphan'); let said = ''; let unseen = true;
++  for (let i = 0; i < 70 && !said; i++) {
++    const r = run(sim, 'Wait for a watch'); sim = r.state;
++    const d = buildNarratorDigest(r, options);
++    if (d.includes('Su Mian sets out for Moonwell Grove.')) said = d;
++    if (r.events.some(e => e.type === 'world.npc_moved' && !e.witnesses!.includes('player')) && d.includes('sets out')) unseen = false;
++  }
++  assert.ok(said);
++  assert.ok(unseen);
++});
++
++test('choices respect the clock: never suggest talking to the sleeping, offer to wait for them, and offer rest at night', () => {
++  for (const origin of ['origin-escort-apprentice', 'origin-ferry-orphan', 'origin-disgraced-disciple']) {
++    for (let tickOfDay = 0; tickOfDay < 6; tickOfDay++) {
++      const s = atTick(createWuxiaSimulation(origin), tickOfDay);
++      const phase = timeOf(s.world).phase;
++      const choices = generateChoices(s, ctx);
++      assert.equal(choices.length, 5, `${origin}@${phase}`);
++      for (const c of choices) {
++        assert.ok(isHonourable(c.text, c.risk, s), c.text);
++        const action = interpretPlayerAction(c.text, s, c.risk);
++        if (action.kind === 'talk') assert.ok(!isAsleep(npc(s, action.targetId!), phase), `${origin}@${phase}: ${c.text}`);
++        assert.notEqual(resolveAction(s, action, 60).status, 'blocked', `${origin}@${phase}: ${c.text}`);
++      }
++      if (timeOf(s.world).isNight) assert.ok(choices.some(c => c.text === 'Rest until dawn') || choiceCandidates(s, ctx).some(c => c.text === 'Rest until dawn'));
++    }
++  }
++  const morningFerry = atTick(createWuxiaSimulation('origin-escort-apprentice'), 2);
++  morningFerry.jianghu!.npcs = morningFerry.jianghu!.npcs.filter(n => n.id === 'npc-ma-tie' || n.locationId !== 'Lantern Ferry');
++  assert.ok(choiceCandidates(morningFerry, ctx).some(c => /^Rest until afternoon when Captain Ma Tie will be up/.test(c.text)));
++});
++
++test('a legacy save is upgraded in place: calendar, roads and routines arrive, story changes survive, and it is idempotent', () => {
++  const fresh = disciple();
++  const old = JSON.parse(JSON.stringify(fresh)) as SimulationState;
++  delete old.world.clock; delete old.world.map;
++  for (const n of old.jianghu!.npcs) { delete n.homeId; delete n.routine; }
++  const gu = npc(old, 'npc-gu-wen'); gu.homeId = 'Cloudstep Peak'; gu.locationId = 'Cloudstep Peak'; // relocated by the story
++  const upgraded = upgradeWuxiaWorld(old);
++  assert.deepStrictEqual(upgraded.world.clock, fresh.world.clock);
++  assert.deepStrictEqual(upgraded.world.map, fresh.world.map);
++  assert.deepStrictEqual(npc(upgraded, 'npc-ma-tie').routine, npc(fresh, 'npc-ma-tie').routine);
++  assert.equal(npc(upgraded, 'npc-gu-wen').homeId, 'Cloudstep Peak');
++  assert.equal(npc(upgraded, 'npc-gu-wen').routine, undefined);
++  assert.deepStrictEqual(upgradeWuxiaWorld(upgraded), upgraded);
++  assert.deepStrictEqual(validateState(upgraded), []);
++  assert.equal(JSON.stringify(old.world.clock), undefined, 'the input is not mutated');
++});
++
++test('state validation rejects a corrupt clock or map', () => {
++  const bad = (mutate: (s: SimulationState) => void) => { const s = disciple(); mutate(s); return validateState(s).length > 0; };
++  assert.ok(bad(s => { s.world.clock!.startTickOfDay = 9; }));
++  assert.ok(bad(s => { s.world.map!.edges[0].ticks = 0; }));
++  assert.ok(bad(s => { s.world.map!.edges.push({ a: 'The Crossroads', b: 'Atlantis', ticks: 6 }); }));
++  assert.ok(bad(s => { s.world.map!.places!['Atlantis'] = {}; }));
++  assert.ok(!bad(() => {}));
++});
++
++test('the live pipeline counts actions, not ticks, in turnCount, and the whole trip is replayable from the seed', () => {
++  const play = () => {
++    const origin = findOrigin('origin-disgraced-disciple')!;
++    const simulation = createWuxiaSimulation(origin.id, FANTASY_PRESETS.living_legends, 'T', 4242);
++    let game: GameState = { character: createOriginCharacter(origin, 'T', 'c', 'living_legends'), turns: [], currentScene: '', location: simulation.character.locationId, questLog: [], relationships: [], isGameStarted: true, isGameOver: false, turnCount: 0, simulation };
++    const script = ['Talk to Old Tea Keeper', 'Rest until dawn', 'Travel to Lantern Ferry', 'Rest until afternoon', 'Talk to Captain Ma Tie', 'Travel to The Crossroads', 'Rest for a day', 'Travel to Jade Hall', 'Practice the Azure River Sword', 'Meditate until midnight'];
++    const ticks: number[] = [];
++    for (const text of script) {
++      const before = game.simulation!.world.turn;
++      game = resolvePlayerAction(game, text, 'low').nextGameState;
++      ticks.push(game.simulation!.world.turn - before);
++      assert.deepStrictEqual(validateState(game.simulation!), []);
++    }
++    assert.equal(game.turnCount, script.length);
++    assert.ok(game.simulation!.world.turn > script.length * 2, 'many more ticks than actions');
++    return { json: JSON.stringify(game.simulation), ticks };
++  };
++  const a = play(); const b = play();
++  assert.equal(a.json, b.json);
++  assert.deepStrictEqual(a.ticks, b.ticks);
++});
++
++test('every origin x every NPC x each phase of the day: any action leaves a valid world and takes at least one tick unless blocked', () => {
++  let checked = 0;
++  for (const origin of ['origin-disgraced-disciple', 'origin-escort-apprentice', 'origin-ferry-orphan', 'origin-wandering-physician', 'origin-frontier-deserter']) {
++    for (let tickOfDay = 0; tickOfDay < 6; tickOfDay++) {
++      const s = atTick(createWuxiaSimulation(origin), tickOfDay);
++      for (const p of NPC_PROFILES) {
++        const copy = JSON.parse(JSON.stringify(s)) as SimulationState; npc(copy, p.npc.id).locationId = copy.character.locationId;
++        for (const text of [`Talk to ${p.npc.name}`, `Challenge ${p.npc.name} to a friendly duel`, 'Rest until dawn', 'Travel to The Crossroads', 'Sneak past everyone']) {
++          const before = JSON.stringify(copy);
++          const r = run(copy, text, 55, 'medium');
++          assert.equal(JSON.stringify(copy), before, 'input mutated');
++          assert.deepStrictEqual(validateState(r.state), [], `${origin}/${tickOfDay}/${p.npc.id}/${text}`);
++          if (r.status !== 'blocked') assert.ok(r.state.world.turn > copy.world.turn, text);
++          else assert.equal(r.state.world.turn, copy.world.turn);
++          checked++;
++        }
++      }
++    }
++  }
++  assert.ok(checked >= 1000);
++});
