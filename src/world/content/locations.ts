@@ -70,6 +70,23 @@ export const TRAVEL_EDGES: TravelEdge[] = [
   { a: 'Blackwater Marsh', b: 'Sunken Archive', days: 2 },
 ];
 
+/** Climate per place: it shapes the weather the framework deals out there (engine/weather.ts). */
+const CLIMATE: Record<string, import('../../engine/worldMap').Climate> = {
+  'The Crossroads': 'temperate', 'Lantern Ferry': 'river', 'Willow Market Town': 'temperate', 'Jade Hall': 'mountain',
+  'Cloudstep Peak': 'mountain', 'Ninefold Monastery': 'mountain', 'Frostbell Pass': 'cold', 'Blackwater Marsh': 'marsh',
+  'Sunken Archive': 'marsh', 'Moonwell Grove': 'forest',
+};
+
+/** The authored roads as engine data. One travel day is a full day (six four-hour ticks). */
+export function buildWorldMap(includeFantasy: boolean): import('../../engine/worldMap').WorldMap {
+  const places = locationsFor(includeFantasy);
+  const ids = new Set(places.map(l => l.id));
+  return {
+    edges: TRAVEL_EDGES.filter(e => ids.has(e.a) && ids.has(e.b)).map(e => ({ a: e.a, b: e.b, ticks: e.days * 6 })),
+    places: Object.fromEntries(places.map(l => [l.id, { climate: CLIMATE[l.id] ?? 'temperate' }])),
+  };
+}
+
 export function locationsFor(includeFantasy: boolean): LocationProfile[] {
   return LOCATIONS.filter(location => includeFantasy || !location.fantasy);
 }

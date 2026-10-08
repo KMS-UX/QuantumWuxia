@@ -1,5 +1,6 @@
 import type { ProposedAction, SimulationState, StateEvent } from './types';
 import { isHonourableBout } from './bout';
+import { advanceRoutines } from './routine';
 import type { FinaleSpec } from './finale';
 
 export type MemoryValence = 'positive' | 'negative' | 'neutral';
@@ -23,6 +24,10 @@ export interface NPCGoal {
   priority: number;
   progress: number;
   active: boolean;
+  /** The goal only becomes pursuable from this tick on ("before the autumn moon", not today). */
+  notBefore?: number;
+  /** On reaching a travel goal's destination the NPC makes it their new home and drops their old routine. */
+  settle?: boolean;
 }
 
 export interface NPCState {
@@ -43,6 +48,12 @@ export interface NPCState {
   power?: number;
   /** Martial art ids this NPC practises (used for counters). */
   arts?: string[];
+  /** Where they sleep and belong; with no `routine`, they return here after dark. */
+  homeId?: string;
+  /** Daily routine by time of day (see routine.ts). */
+  routine?: import('./routine').RoutineEntry[];
+  /** Set while walking between places; their `locationId` is the transit sentinel until they arrive. */
+  transit?: import('./routine').NpcTransit;
 }
 
 export interface FactionState {
@@ -447,7 +458,7 @@ function propagateRumors(jianghu: JianghuState, simulation: SimulationState, eve
 function advanceNpcGoals(jianghu: JianghuState, simulation: SimulationState, events: StateEvent[]): void {
   for (const npc of jianghu.npcs) {
     if (!npc.alive) continue;
-    const goal = npc.goals.filter(g => g.active).sort((a, b) => b.priority - a.priority)[0];
+    const goal = npc.goals.filter(g => g.active && (g.notBefore === undefined || simulation.world.turn >= g.notBefore)).sort((a, b) => b.priority - a.priority)[0];
     if (!goal) continue;
     if (goal.kind === 'travel' && goal.targetId && npc.locationId === goal.targetId) goal.progress = 100;
     else if (goal.kind === 'protect' && npc.locationId === simulation.character.locationId) goal.progress = clamp(goal.progress + 2, 0, 100);
@@ -481,13 +492,9 @@ export function tickJianghu(
     faction.internalTension = clamp(faction.internalTension + (faction.resources < 15 ? 1 : cooling), 0, 100);
   }
 
-  for (const npc of jianghu.npcs) {
-    if (!npc.alive) continue;
-    if (npc.locationId !== simulation.character.locationId && turn % 5 === 0) {
-      const faction = npc.factionId ? jianghu.factions.find(f => f.id === npc.factionId) : undefined;
-      if (faction && faction.territory.length > 0) npc.locationId = faction.territory[turn % faction.territory.length];
-    }
-  }
+  // Movement is routine- and goal-driven and takes time (routine.ts); this replaces a rule that
+  // teleported absent NPCs to a random faction territory every fifth turn.
+  advanceRoutines(jianghu, simulation, events);
 
   for (const rumor of jianghu.rumors) {
     rumor.credibility = clamp(rumor.credibility + (rumor.status === 'confirmed' ? 1 : -1), 0, 100);

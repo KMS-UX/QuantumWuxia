@@ -5,6 +5,8 @@ import { applyFinale, conditionHolds, selectFinaleOutcome, validateFinaleSpec, t
 import { advanceCausalChains } from '../../src/engine/jianghuInformationV4';
 import { buildNarratorDigest } from '../../src/engine/narratorDigest';
 import { resolveAction } from '../../src/engine/resolveAction';
+import { timeOf } from '../../src/engine/clock';
+import { isAsleep } from '../../src/engine/routine';
 import type { SimulationState } from '../../src/engine/types';
 import { validateState } from '../../src/engine/validateState';
 import {
@@ -97,8 +99,11 @@ test('a player who earned trust and is present changes the outcome, and witnesse
   // builds (goodwill decays over the middle stages), so trust has to be maintained, not just earned once.
   let state = createWuxiaSimulation('origin-escort-apprentice');
   let finale: Record<string, string | number | boolean | null> | undefined; let digest = '';
-  for (let t = 1; t <= 30 && !finale; t++) {
-    const text = t <= 3 || t >= 16 ? 'Talk to Captain Ma Tie' : 'Rest';
+  for (let t = 1; t <= 40 && !finale; t++) {
+    // Captain Ma sleeps through the morning, so talk only when he is up.
+    const ma = state.jianghu!.npcs.find(n => n.id === 'npc-ma-tie')!;
+    const awake = !isAsleep(ma, timeOf(state.world).phase);
+    const text = awake && (state.world.turn <= 9 || state.world.turn >= 15) ? 'Talk to Captain Ma Tie' : 'Rest';
     const r = resolveAction(state, interpretPlayerAction(text, state, 'low'), 60); state = r.state;
     const e = r.events.find(ev => ev.type === 'world.finale_resolved' && ev.payload.eventId === 'event-toll-dispute');
     if (e) { finale = e.payload; digest = buildNarratorDigest(r, options); }

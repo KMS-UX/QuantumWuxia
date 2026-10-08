@@ -2,6 +2,8 @@ import type { SimulationState } from '../../engine/types';
 import { createDefaultWuxiaCharacter } from '../../engine/wuxia';
 import { DEFAULT_FANTASY_PRESET, FANTASY_PRESETS, supernaturalEnabled, type FantasyLayerConfig } from './fantasyLayer';
 import { createWuxiaJianghu, wuxiaLocationIds } from './jianghuSeed';
+import { buildWorldMap } from './locations';
+import { DEFAULT_CLOCK } from '../../engine/clock';
 import { instantiateArt } from './martialArts';
 import { ORIGINS, originsFor } from './origins';
 
@@ -57,8 +59,31 @@ export function createWuxiaSimulation(
       knownRumorIds: [],
       knownNpcIds: [],
       rng: { seed: seed >>> 0, draws: 0 },
+      clock: { ...DEFAULT_CLOCK, startTickOfDay: origin.startTickOfDay ?? DEFAULT_CLOCK.startTickOfDay },
+      map: buildWorldMap(supernaturalEnabled(fantasy)),
     },
     jianghu: createWuxiaJianghu({ fantasy }),
     ledger: [],
   };
+}
+
+/**
+ * Bring a game saved before the calendar existed up to date: it gets the calendar, the roads and
+ * its NPCs' homes and routines. Idempotent, and it never touches anything the player has changed
+ * (an NPC who already has a home or routine keeps it, so story relocations survive).
+ */
+export function upgradeWuxiaWorld(sim: SimulationState, fantasy: FantasyLayerConfig = FANTASY_PRESETS[DEFAULT_FANTASY_PRESET]): SimulationState {
+  const next: SimulationState = JSON.parse(JSON.stringify(sim));
+  next.world.clock ??= { ...DEFAULT_CLOCK };
+  next.world.map ??= buildWorldMap(supernaturalEnabled(fantasy));
+  const authored = createWuxiaJianghu({ fantasy });
+  for (const npc of next.jianghu?.npcs ?? []) {
+    const seed = authored.npcs.find(n => n.id === npc.id);
+    if (!seed) continue;
+    const unset = npc.homeId === undefined;
+    npc.homeId ??= seed.homeId;
+    // A relocated NPC (home changed by the story) keeps their new life; everyone else gets the authored routine.
+    if (npc.routine === undefined && seed.routine && (unset || npc.homeId === seed.homeId)) npc.routine = seed.routine;
+  }
+  return next;
 }

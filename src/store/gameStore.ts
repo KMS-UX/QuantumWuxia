@@ -14,6 +14,7 @@ import { buildNarratorDigest } from '../engine/narratorDigest';
 import { randomSeed } from '../engine/rng';
 import { fallbackNarration } from '../ai/fallbackNarrator';
 import { generateChoices, mergeChoices } from '../ai/choiceGenerator';
+import { upgradeWuxiaWorld } from '../world/content';
 import { FANTASY_PRESETS, buildChoiceContext, buildDigestOptions, buildOriginOpening, buildOriginScenario, createWuxiaSimulation, findOrigin } from '../world/content';
 import type { SimulationState } from '../engine/types';
 
@@ -173,6 +174,13 @@ function getDemoResponse(action: string): LLMResponse {
       itemsGained: lowerAction.includes('nail') ? ['Rusty Nail'] : [],
     },
   };
+}
+
+/** Games saved before the calendar existed get the calendar, roads and routines on their next action. */
+function upgradeLegacyWorld(game: GameState): GameState {
+  const sim = game.simulation;
+  if (!game.character?.originId || !sim || (sim.world.clock && sim.world.map)) return game;
+  return { ...game, simulation: upgradeWuxiaWorld(sim) };
 }
 
 /**
@@ -388,7 +396,7 @@ export const useGameStore = create<GameStore>()(
 
         try {
           const selectedChoice = gameState.turns[gameState.turns.length - 1]?.choices.find(c => c.id === choiceId);
-          const prepared = resolvePlayerAction(gameState, choiceText, selectedChoice?.risk ?? 'medium');
+          const prepared = resolvePlayerAction(upgradeLegacyWorld(gameState), choiceText, selectedChoice?.risk ?? 'medium');
           const resolvedState = prepared.nextGameState;
           const resolutionContext = gameState.character?.originId
             ? `[Resolved action]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`
@@ -451,7 +459,7 @@ export const useGameStore = create<GameStore>()(
         set({ isLoading: true, error: null });
 
         try {
-          const prepared = resolvePlayerAction(gameState, action, 'medium');
+          const prepared = resolvePlayerAction(upgradeLegacyWorld(gameState), action, 'medium');
           const resolvedState = prepared.nextGameState;
           const resolutionContext = gameState.character?.originId
             ? `[Resolved intent]\n${buildNarratorDigest(prepared.resolution, buildDigestOptions())}`

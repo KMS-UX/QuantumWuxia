@@ -22,7 +22,15 @@ Candidate Bible §18 entries from the v2-v5 work. Each says what changed, why, a
 | D15 | Defeat resolves as mercy, robbery, detention or death by fixed rules; death needs a lethal, high-risk attack on a master (power 70+) with a large margin, and never happens at a monastery. Origin characters cannot revive. | Bible §7: new situations, no automatic revive. | `chooseDefeat`, store, DeathScreen |
 | D16 | Injuries have mechanical effects by region (arms: fighting; legs: travel and stealth; internal: Qi recovery); rest speeds healing. | Bible §7 examples. | `combat.ts`, `wuxiaRules.ts`, resolver |
 
+| D17 | `world.turn` is a tick of four hours (six a day); `turnCount` counts player actions. The calendar is opt-in per world (`world.clock`); worlds without it feel no day, night or weather. | Bible §11. Opt-in keeps old saves and test fixtures byte-for-byte stable. | `clock.ts`, resolver, pipeline |
+| D18 | Travel time comes from `world.map` routes and weather; the player is "in transit" (no location, no witnessing) for all but the last tick; blocked actions take no time. | A journey must let the world move and must not let the player see what they missed. | `worldMap.ts`, `environment.ts`, resolver |
+| D19 | Weather is a pure function of (seed, day, season, climate); never stored. | Replayable (D11) and save-proof. | `weather.ts` |
+| D20 | NPCs sleep in the small hours unless a routine says otherwise; routines and homes are data; movement takes route time; the old random teleport is removed. Story relocations set a new home and drop the routine. | Bible §9, §11. | `routine.ts`, `finale.ts`, `jianghu.ts` |
+| D21 | Players state durations in free text ("until dawn", "for two days"), capped at four days. | Intent-driven play. | `actionInterpreter.ts` |
+| D22 | Framework vs content is a tested boundary: the engine/AI layers may not import content or UI, use randomness, or name authored ids. | Content and story should come from data and from the player, not the code. | `architecture.test.ts` |
+
 ## Open decisions (not made)
+- **Dated and scheduled events** (a framework system so content and player actions can set "something happens on day N").
 - **V5 causal branching is never reached in live play** (V4 sets the shared timer first). Activating it changes outcomes: its default branch for low-severity faction events is "de-escalate", which would end disputes early. Recommendation: do not activate until finales cover the branches it would otherwise decide.
 - **Time model** (hour/date/season/weather, travel duration from the weighted map): Bible §11, absent.
 - **Defeat model** to replace `revive()`: capture, ransom, forced debt, scar, per Bible §7.

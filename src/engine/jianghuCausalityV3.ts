@@ -1,5 +1,7 @@
 import type { SimulationState, StateEvent } from './types';
 import type { JianghuState, NPCState, RelationshipState, ObligationState, FactionRelationState, MarketState } from './jianghu';
+import { TRANSIT_LOCATION } from './worldMap';
+import { beginNpcTravel } from './routine';
 import { createNpcPlan, emitNpcAgencyEvent, evaluateNpcOpportunity, executeNpcPlan, selectNpcGoal } from './npcAgency';
 
 export interface V3Result {
@@ -94,16 +96,18 @@ function autonomousNpcActions(j: JianghuState, simulation: SimulationState, even
   const ordered = j.npcs
     .filter(npc => npc.alive)
     .sort((a, b) => {
-      const pa = selectNpcGoal(a)?.priority ?? 0;
-      const pb = selectNpcGoal(b)?.priority ?? 0;
+      const pa = selectNpcGoal(a, simulation.world.turn)?.priority ?? 0;
+      const pb = selectNpcGoal(b, simulation.world.turn)?.priority ?? 0;
       return pb - pa || a.id.localeCompare(b.id);
     });
 
   for (const npc of ordered) {
     if (budget <= 0) break;
 
+    if (npc.transit) continue; // on the road; they act again when they arrive
+
     // Goal: choose the highest-priority active goal.
-    const goal = selectNpcGoal(npc);
+    const goal = selectNpcGoal(npc, simulation.world.turn);
     if (!goal) continue;
 
     // Plan: turn the goal into a concrete deterministic plan.
@@ -114,7 +118,12 @@ function autonomousNpcActions(j: JianghuState, simulation: SimulationState, even
     if (!opportunity.available) continue;
 
     // Action + consequence: mutate the cloned Jianghu state and emit a structured event.
-    const result = executeNpcPlan(j, npc, plan, opportunity, simulation.world.turn, relation, ensureMarket);
+    const startedFrom = npc.locationId;
+    const result = executeNpcPlan(j, npc, plan, opportunity, simulation.world.turn, relation, ensureMarket, (who, to) => {
+      const ticks = beginNpcTravel(who, to, simulation);
+      const seen = startedFrom === simulation.character.locationId || (ticks === 0 && to === simulation.character.locationId);
+      events.push({ type: 'world.npc_moved', causes: [`npc:${who.id}:${ticks === 0 ? 'arrival' : 'departure'}`], witnesses: seen ? [simulation.character.id, who.id] : [who.id], knowledgeConsequences: seen ? [`player:saw:${who.id}:${ticks === 0 ? 'arrive' : 'leave'}`] : [], payload: { npcId: who.id, from: startedFrom, to, arriving: ticks === 0, arriveTurn: simulation.world.turn + ticks } });
+    });
     if (!result.acted) continue;
 
     budget--;
@@ -130,9 +139,11 @@ export function applyCausalityV3(input: JianghuState, simulation: SimulationStat
   advanceObligations(j, simulation, events);
   applyFactionPressure(j, simulation, events);
   autonomousNpcActions(j, simulation, events);
-  const market = ensureMarket(j, simulation.character.locationId, simulation.world.turn);
-  updateMarket(market, simulation.world.turn);
-  events.push({ type: 'world.market_changed', causes: [`market:${market.locationId}:update`, `turn:${market.lastUpdatedTurn}:tick`], payload: { locationId: market.locationId, turn: market.lastUpdatedTurn } });
+  if (simulation.character.locationId !== TRANSIT_LOCATION) {
+    const market = ensureMarket(j, simulation.character.locationId, simulation.world.turn);
+    updateMarket(market, simulation.world.turn);
+    events.push({ type: 'world.market_changed', causes: [`market:${market.locationId}:update`, `turn:${market.lastUpdatedTurn}:tick`], payload: { locationId: market.locationId, turn: market.lastUpdatedTurn } });
+  }
   return { jianghu: j, events };
 }
 

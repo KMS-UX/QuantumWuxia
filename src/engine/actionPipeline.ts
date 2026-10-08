@@ -32,7 +32,8 @@ export function resolvePlayerAction(
   const resolution = resolveAction(simulation, action, roll ?? rollAt(rng.seed, rng.draws));
   // An explicit roll consumes nothing, so a replay that injects rolls does not disturb the saved sequence.
   resolution.state.world.rng = roll === undefined ? consumeDraw(rng) : rng;
-  const nextGameState = exitSimulationBoundary(gameState, resolution.state);
+  // `turnCount` counts the player's actions; the simulation's own clock (`world.turn`) counts four-hour ticks.
+  const nextGameState = { ...exitSimulationBoundary(gameState, resolution.state), turnCount: gameState.turnCount + 1 };
 
   return { resolution, nextGameState };
 }

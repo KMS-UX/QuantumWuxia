@@ -145,7 +145,7 @@ export const NPC_PROFILES: NpcProfile[] = [
   { zh: '蘇眠', fantasy: true, appearance: 'A ferry singer with a river-lamp voice and eyes that catch light like an animal\'s.',
     voice: 'Playful and oblique; answers in song fragments, never lies outright but never answers straight.',
     npc: npc({ id: 'npc-su-mian', name: 'Su Mian', role: 'ferry singer', locationId: 'Lantern Ferry',
-      goals: [goal('goal-return-grove', 'travel', 'Return to Moonwell Grove before the autumn moon', 80, 'Moonwell Grove'), goal('goal-listen', 'investigate', 'Listen for who is hunting the grove', 70)],
+      goals: [{ ...goal('goal-return-grove', 'travel', 'Return to Moonwell Grove before the autumn moon', 80, 'Moonwell Grove'), notBefore: 42, settle: true }, goal('goal-listen', 'investigate', 'Listen for who is hunting the grove', 70)],
       fears: ['iron bells', 'being recognized'],
       secrets: ['A fox spirit in human form.', 'Her grove\'s well is being sought by a relic-hunter.'],
       skills: ['singing', 'Foxfire Illusion Steps', 'listening'], resources: 8 }) },
@@ -157,6 +157,52 @@ export const NPC_PROFILES: NpcProfile[] = [
       secrets: ['Has kept the archive for far longer than a human lifetime.', 'The poison codex is real, and he knows what it costs to read it.'],
       skills: ['scholarship', 'languages', 'ancient arts'], resources: 15 }) },
 ];
+
+/**
+ * Where each NPC belongs and, where it matters, how their day differs from the default (asleep in
+ * the small hours, otherwise wherever they are). These are replaceable data: the routine engine
+ * knows nothing about them, and an NPC with neither entry simply follows the default.
+ */
+const ROUTINES: Record<string, { home: string; routine?: import('../../engine/routine').RoutineEntry[] }> = {
+  'npc-teahouse-keeper': { home: 'The Crossroads' },
+  'npc-wandering-swordsman': { home: 'The Crossroads' },
+  'npc-yun-shuang': { home: 'Willow Market Town' },
+  'npc-bai-qingshan': { home: 'Jade Hall' },
+  'npc-gu-wen': { home: 'Jade Hall' },
+  // The ferry never closes: Captain Ma works the lantern pier through the night and sleeps by day.
+  'npc-ma-tie': { home: 'Lantern Ferry', routine: [
+    { phases: ['late_night', 'night'], locationId: 'Lantern Ferry', activity: 'work' },
+    { phases: ['dawn', 'morning'], locationId: 'Lantern Ferry', activity: 'sleep' },
+    { phases: ['afternoon', 'evening'], locationId: 'Lantern Ferry', activity: 'work' },
+  ] },
+  'npc-abbot-huiyuan': { home: 'Ninefold Monastery', routine: [
+    { phases: ['dawn'], locationId: 'Ninefold Monastery', activity: 'worship' },
+    { phases: ['late_night'], locationId: 'Ninefold Monastery', activity: 'sleep' },
+    { phases: ['morning', 'afternoon', 'evening', 'night'], locationId: 'Ninefold Monastery', activity: 'work' },
+  ] },
+  'npc-lian-xiaoyue': { home: 'Blackwater Marsh' },
+  // The garrison is always watched.
+  'npc-zhao-rong': { home: 'Frostbell Pass', routine: [
+    { phases: ['late_night'], locationId: 'Frostbell Pass', activity: 'patrol' },
+    { phases: ['dawn', 'morning', 'afternoon', 'evening'], locationId: 'Frostbell Pass', activity: 'work' },
+    { phases: ['night'], locationId: 'Frostbell Pass', activity: 'sleep' },
+  ] },
+  'npc-ah-lin': { home: 'Willow Market Town' },
+  // A ferry singer who sings by night and sleeps through the morning.
+  'npc-su-mian': { home: 'Lantern Ferry', routine: [
+    { phases: ['evening', 'night', 'late_night'], locationId: 'Lantern Ferry', activity: 'leisure' },
+    { phases: ['dawn', 'morning'], locationId: 'Lantern Ferry', activity: 'sleep' },
+    { phases: ['afternoon'], locationId: 'Lantern Ferry', activity: 'leisure' },
+  ] },
+  // The archivist does not sleep.
+  'npc-archivist-mo': { home: 'Sunken Archive', routine: [
+    { phases: ['late_night', 'dawn', 'morning', 'afternoon', 'evening', 'night'], locationId: 'Sunken Archive', activity: 'work' },
+  ] },
+};
+for (const profile of NPC_PROFILES) {
+  const entry = ROUTINES[profile.npc.id];
+  if (entry) { profile.npc.homeId = entry.home; if (entry.routine) profile.npc.routine = entry.routine; }
+}
 
 for (const profile of NPC_PROFILES) {
   const combat = COMBAT[profile.npc.id];

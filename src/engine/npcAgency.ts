@@ -26,9 +26,9 @@ export interface NPCAgencyResult {
 
 const clamp = (value: number, min = -100, max = 100) => Math.max(min, Math.min(max, value));
 
-export function selectNpcGoal(npc: NPCState): NPCGoal | undefined {
+export function selectNpcGoal(npc: NPCState, turn?: number): NPCGoal | undefined {
   return npc.goals
-    .filter(goal => goal.active)
+    .filter(goal => goal.active && (goal.notBefore === undefined || turn === undefined || turn >= goal.notBefore))
     .sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0];
 }
 
@@ -96,16 +96,20 @@ export function executeNpcPlan(
   turn: number,
   relation: (state: JianghuState, subjectId: string, targetId: string, turn: number) => { debt: number; grudge: number },
   ensureMarket: (state: JianghuState, locationId: string, turn: number) => { goods: Record<string, number> },
+  /** Starts a journey that takes time. Without it (older callers, tests) travel is instant. */
+  walk?: (npc: NPCState, to: string) => void,
 ): NPCAgencyResult {
   if (!opportunity.available) return { plan, opportunity, acted: false };
 
   switch (plan.kind) {
     case 'travel': {
-      npc.locationId = plan.targetId!;
+      if (walk) walk(npc, plan.targetId!); else npc.locationId = plan.targetId!;
       const goal = npc.goals.find(goal => goal.id === plan.goalId);
       if (goal) {
         goal.progress = 100;
         goal.active = false;
+        // A journey to somewhere they mean to stay: that is where they live now.
+        if (goal.settle) { npc.homeId = plan.targetId!; npc.routine = undefined; }
       }
       return { plan, opportunity, acted: true };
     }

@@ -1,3 +1,6 @@
+import { describeTime } from '../engine/clock';
+import { environmentAt } from '../engine/environment';
+import { weatherWord } from '../engine/weather';
 import { useState, useRef, useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { Send, Swords, Scroll, User, Settings, Package, MapPin, Heart, Droplets, Coins, Star, Zap, AlertCircle, Save, BookOpen, Database } from 'lucide-react';
@@ -564,6 +567,15 @@ function RightPanel() {
   
   return (
     <div className="p-4 space-y-4">
+      {isWuxia && simulation?.world.clock && (() => {
+        const env = environmentAt(simulation, locationId);
+        return (
+          <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700 text-xs">
+            <div className="font-semibold text-gray-200">{describeTime(env.time)}</div>
+            <div className="mt-0.5 text-gray-400">{env.indoors ? 'Sheltered indoors' : weatherWord(env.weather).replace(/^./, c => c.toUpperCase())}</div>
+          </div>
+        );
+      })()}
       {/* Quest Log */}
       <div className="bg-gray-900/50 rounded-xl p-3 border border-gray-700">
         <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-1">

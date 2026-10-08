@@ -7,6 +7,9 @@ import type {
 } from './types';
 import { validateState } from './validateState';
 import { qiRecovery } from './wuxiaRules';
+import { environmentAt, difficultyModifier, journeyTicks, weatherFatigue } from './environment';
+import { isAsleep } from './routine';
+import { TRANSIT_LOCATION } from './worldMap';
 import { applyDuel, applyMastery, bestCombatArt, duelDifficulty, findTechnique, combatEdge, injuryPenalty, masteryGain, techniqueLocked, type ArtUse } from './combat';
 import { syncInjuries } from './wuxia';
 import { applyJianghuAction, createDefaultJianghu, tickJianghu } from './jianghu';
@@ -124,13 +127,34 @@ export function resolveAction(
   // A named technique costs its Qi; plain strikes, talk and travel cost none.
   const named: ArtUse | undefined = findTechnique(c, normalizedAction.techniqueId);
   const qiCost = normalizedAction.qiCost ?? named?.technique?.qiCost ?? 0;
-  const timeCost = normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' || normalizedAction.kind === 'travel' || normalizedAction.kind === 'train' ? 2 : 1);
+  // How long it takes, in ticks (one tick = four hours). Travel follows the map and the weather;
+  // an explicit `timeCost` (for example "rest until dawn") overrides the default for everything else.
+  const journey = normalizedAction.kind === 'travel' && normalizedAction.destinationId
+    ? journeyTicks(state, c.locationId, normalizedAction.destinationId)
+    : undefined;
+  const timeCost = normalizedAction.kind === 'travel' && journey
+    ? Math.max(1, journey.ticks)
+    : Math.max(1, Math.min(24, Math.round(normalizedAction.timeCost ?? (normalizedAction.kind === 'rest' || normalizedAction.kind === 'train' ? 2 : 1))));
+  const env = environmentAt(state, c.locationId);
   const blockedNow = (summary: string, difficulty: number): ActionResolution => ({
     status: 'blocked', summary, action: normalizedAction, state,
     events: [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }],
     ledger: persistLedger('blocked', [{ type: 'action.resolved', payload: { kind: normalizedAction.kind, status: 'blocked' } }]),
     roll, difficulty,
   });
+
+  if (normalizedAction.kind === 'travel' && normalizedAction.destinationId && state.world.map && !journey) {
+    return blockedNow('There is no road from here to there.', DIFFICULTY.travel);
+  }
+  const talkTarget = normalizedAction.kind === 'talk' && normalizedAction.targetId
+    ? state.jianghu?.npcs.find(n => n.id === normalizedAction.targetId)
+    : undefined;
+  if (talkTarget && talkTarget.alive && talkTarget.locationId === c.locationId && env.calendar && isAsleep(talkTarget, env.time.phase)) {
+    return blockedNow(`${talkTarget.name} is asleep.`, DIFFICULTY.talk);
+  }
+  if (talkTarget && talkTarget.alive && talkTarget.locationId !== c.locationId) {
+    return blockedNow(`${talkTarget.name} is not here.`, DIFFICULTY.talk);
+  }
 
   const duelTarget = normalizedAction.kind === 'attack' && normalizedAction.targetId
     ? state.jianghu?.npcs.find(n => n.id === normalizedAction.targetId)
@@ -175,28 +199,31 @@ export function resolveAction(
 
   const attackUse: ArtUse | undefined = named ?? (normalizedAction.kind === 'attack' && bestCombatArt(c) ? { art: bestCombatArt(c)! } : undefined);
   let difficulty = clamp(DIFFICULTY[normalizedAction.kind] + RISK_MODIFIER[normalizedAction.riskPosture ?? normalizedAction.risk] - Math.floor(c.attributes.luck / 5), 5, 95)
-    + injuryPenalty(c, normalizedAction.kind);
+    + injuryPenalty(c, normalizedAction.kind)
+    + difficultyModifier(normalizedAction.kind, env);
   let score = roll + Math.floor((c.attributes.perception + c.attributes.agility) / 4);
   if (duelTarget) {
     difficulty = duelDifficulty(duelTarget, normalizedAction.riskPosture ?? normalizedAction.risk, c.attributes.luck);
     score = roll + combatEdge(c, attackUse, duelTarget);
   }
   let status: ActionResolution['status'];
+  let travelFrom: string | undefined;
+  let travelTo: string | undefined;
 
   if (normalizedAction.kind === 'rest') {
     status = 'success';
-    c.fatigue = clamp(c.fatigue - 25, 0, 100);
-    const restoredHp = Math.min(c.maxHp - c.hp, Math.max(1, Math.floor(c.maxHp * 0.05)));
+    c.fatigue = clamp(c.fatigue - 12 * timeCost, 0, 100);
+    const restoredHp = Math.min(c.maxHp - c.hp, Math.max(1, Math.ceil(c.maxHp * 0.025 * timeCost)));
     c.hp += restoredHp;
     events.push({ type: 'character.hp_changed', causes: ['action:rest'], payload: { amount: restoredHp, reason: 'rest' } });
     events.push({ type: 'character.fatigue_changed', causes: ['action:rest'], payload: { value: c.fatigue } });
-    // Rest is how wounds close faster (Bible section 7: recovery).
-    if (c.wuxia) c.wuxia.injuries = c.wuxia.injuries.map(i => ({ ...i, healingTurns: Math.max(1, i.healingTurns - 1) }));
+    // Rest is how wounds close faster (Bible section 7): it doubles the healing the passing time already gives.
+    if (c.wuxia) c.wuxia.injuries = c.wuxia.injuries.map(i => ({ ...i, healingTurns: Math.max(1, i.healingTurns - timeCost) }));
   } else if (normalizedAction.kind === 'meditate') {
     status = 'success';
     const restoredQi = Math.min(
       c.maxQi - c.qi,
-      c.wuxia ? qiRecovery(c as typeof c & { wuxia: NonNullable<typeof c.wuxia> }, Math.max(1, Math.floor(c.maxQi * 0.15))) : Math.max(1, Math.floor(c.maxQi * 0.15)),
+      c.wuxia ? qiRecovery(c as typeof c & { wuxia: NonNullable<typeof c.wuxia> }, Math.max(1, Math.floor(c.maxQi * 0.15 * timeCost))) : Math.max(1, Math.floor(c.maxQi * 0.15 * timeCost)),
     );
     c.qi += restoredQi;
     if (c.wuxia) {
@@ -256,9 +283,9 @@ export function resolveAction(
     if (!duelTarget && normalizedAction.kind !== 'train') c.qi -= qiCost;
     if (qiCost > 0 && !duelTarget && normalizedAction.kind !== 'train') events.push({ type: 'character.qi_changed', causes: [`action:${normalizedAction.kind}`, 'resource:qi'], payload: { amount: -qiCost, reason: normalizedAction.kind } });
     if (status === 'success' && normalizedAction.kind === 'travel' && normalizedAction.destinationId) {
-      const from = c.locationId;
-      c.locationId = normalizedAction.destinationId;
-      events.push({ type: 'world.location_changed', causes: ['action:travel', `location:${from}`], witnesses: [c.id], payload: { from, to: c.locationId } });
+      // The player is on the road for the whole journey (see the tick loop below) and arrives on its last tick.
+      travelFrom = c.locationId;
+      travelTo = normalizedAction.destinationId;
     }
     if (status === 'success' && normalizedAction.kind === 'inspect' && normalizedAction.targetId) {
       const fact = `inspected:${normalizedAction.targetId}`;
@@ -267,13 +294,20 @@ export function resolveAction(
         events.push({ type: 'world.fact_discovered', causes: ['action:inspect', `target:${normalizedAction.targetId}`], witnesses: [c.id], knowledgeConsequences: [`player:fact:${fact}`], payload: { fact } });
       }
     }
-    c.fatigue = clamp(c.fatigue + Math.ceil(timeCost * (normalizedAction.risk === 'high' ? 8 : 4)), 0, 100);
+    // Effort per tick (travel is steadier than a fight), plus whatever the weather adds outdoors.
+    const spent = travelTo ? timeCost : (normalizedAction.kind === 'travel' ? 1 : timeCost);
+    const perTick = normalizedAction.kind === 'travel' ? (normalizedAction.risk === 'high' ? 6 : 3) : (normalizedAction.risk === 'high' ? 8 : 4);
+    const outdoors = normalizedAction.kind === 'travel' ? { ...env, indoors: false } : env;
+    c.fatigue = clamp(c.fatigue + Math.ceil(spent * perTick) + spent * weatherFatigue(outdoors), 0, 100);
     events.push({ type: 'character.fatigue_changed', payload: { value: c.fatigue } });
   }
 
+  // Time that actually passes: a successful journey takes its full length; a failed attempt costs one tick.
+  const elapsed = normalizedAction.kind === 'travel' && !travelTo ? 1 : timeCost;
+
   if (c.wuxia && c.wuxia.injuries.length > 0) {
     c.wuxia.injuries = c.wuxia.injuries
-      .map(injury => ({ ...injury, healingTurns: Math.max(0, injury.healingTurns - 1) }))
+      .map(injury => ({ ...injury, healingTurns: Math.max(0, injury.healingTurns - elapsed) }))
       .filter(injury => injury.healingTurns > 0);
     const synced = syncInjuries(c as typeof c & { wuxia: NonNullable<typeof c.wuxia> });
     c.conditions = synced.conditions;
@@ -291,16 +325,23 @@ export function resolveAction(
     events.push(...interaction.events);
   }
 
-  state.world.turn += 1;
-
-  if (state.jianghu) {
-    const ticked = tickJianghu(state.jianghu, state);
-    const v3 = applyCausalityV3(ticked.jianghu, state);
-    const info = processInformation(v3.jianghu, state);
-    const chains = advanceCausalChains(info.jianghu, state);
-    const v5 = advanceCausalityV5(chains.jianghu, state);
-    state.jianghu = v5.jianghu;
-    events.push(...ticked.events, ...v3.events, ...info.events, ...chains.events, ...v5.events);
+  // The world moves one tick at a time for as long as the action takes, so a three-day journey is
+  // three days of rumors, NPC errands and slow-burn events, and nobody "sees" what the traveller misses.
+  for (let step = 1; step <= elapsed; step++) {
+    state.world.turn += 1;
+    if (travelTo) c.locationId = step < elapsed ? TRANSIT_LOCATION : travelTo;
+    if (state.jianghu) {
+      const ticked = tickJianghu(state.jianghu, state);
+      const v3 = applyCausalityV3(ticked.jianghu, state);
+      const info = processInformation(v3.jianghu, state);
+      const chains = advanceCausalChains(info.jianghu, state);
+      const v5 = advanceCausalityV5(chains.jianghu, state);
+      state.jianghu = v5.jianghu;
+      events.push(...ticked.events, ...v3.events, ...info.events, ...chains.events, ...v5.events);
+    }
+  }
+  if (travelFrom && travelTo) {
+    events.push({ type: 'world.location_changed', causes: ['action:travel', `location:${travelFrom}`], witnesses: [c.id], payload: { from: travelFrom, to: travelTo, ticks: elapsed, weather: journey?.weather.kind ?? 'clear', delayed: journey?.delayed ?? false } });
   }
 
   events.push({
@@ -308,7 +349,7 @@ export function resolveAction(
     causes: [`action:${normalizedAction.kind}`, `resolution:${status}`],
     witnesses: [c.id],
     causalLinks: state.ledger.slice(-3).map(entry => entry.eventId),
-    payload: { kind: normalizedAction.kind, status, difficulty, roll, score, turn: state.world.turn },
+    payload: { kind: normalizedAction.kind, status, difficulty, roll, score, turn: state.world.turn, ticks: elapsed },
   });
 
   const summaries: Record<ActionResolution['status'], string> = {

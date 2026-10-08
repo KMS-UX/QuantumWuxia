@@ -61,6 +61,10 @@ export interface SimWorld {
   knownNpcIds?: string[];
   /** Saved seed and draw counter for replayable rolls (see rng.ts). Absent on older saves. */
   rng?: { seed: number; draws: number };
+  /** Calendar for this game; absent on older saves (defaults apply). See clock.ts. */
+  clock?: import('./clock').ClockConfig;
+  /** Roads and place climates; absent means travel is instant and weather is temperate. See worldMap.ts. */
+  map?: import('./worldMap').WorldMap;
 }
 
 export interface SimulationState {
@@ -108,6 +112,7 @@ export interface StateEvent {
     | 'character.mastery_changed'
     | 'character.combat_resolved'
     | 'character.defeated'
+    | 'world.npc_moved'
     | 'character.social_changed'
     | 'world.location_changed'
     | 'world.fact_discovered'

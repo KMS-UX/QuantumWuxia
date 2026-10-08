@@ -1,3 +1,5 @@
+import { validClock } from './clock';
+import { validateMap } from './worldMap';
 import type { SimulationState } from './types';
 
 export type StateValidationIssue = {
@@ -26,6 +28,12 @@ export function validateState(state: SimulationState): StateValidationIssue[] {
   const rng = state.world.rng;
   if (rng && !(Number.isInteger(rng.seed) && rng.seed >= 0 && rng.seed <= 0xffffffff && Number.isInteger(rng.draws) && rng.draws >= 0)) {
     issues.push({ path: 'world.rng', message: 'rng must hold an integer 32-bit seed and a non-negative integer draw count.' });
+  }
+  if (state.world.clock && !validClock(state.world.clock)) {
+    issues.push({ path: 'world.clock', message: 'Clock config must have valid season, day and tick values.' });
+  }
+  if (state.world.map) {
+    for (const problem of validateMap(state.world.map, state.world.locationIds)) issues.push({ path: 'world.map', message: problem });
   }
   if (!state.world.locationIds.includes(c.locationId)) {
     issues.push({ path: 'character.locationId', message: 'Current location must exist in world.locationIds.' });

@@ -1,4 +1,8 @@
+import { describeDuration, describeTime, timeOf } from './clock';
+import { environmentAt } from './environment';
 import { regionName } from './bout';
+import { isAsleep } from './routine';
+import { weatherWord } from './weather';
 import { chainPace } from './jianghu';
 import type { ActionResolution, StateEvent } from './types';
 
@@ -44,8 +48,18 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
   const happened: string[] = [];
   for (const e of events) {
     switch (e.type) {
-      case 'world.location_changed':
-        if (witnessed(e)) happened.push(`You travelled from ${str(e.payload.from)} to ${str(e.payload.to)}.`);
+      case 'world.location_changed': {
+        if (!witnessed(e)) break;
+        const ticks = num(e.payload.ticks);
+        const length = ticks && ticks > 1 ? ` The journey took ${describeDuration(ticks)}${e.payload.delayed === true ? ', slowed by the weather' : ''}.` : '';
+        happened.push(`You travelled from ${str(e.payload.from)} to ${str(e.payload.to)}.${length}`);
+        break;
+      }
+      case 'world.npc_moved':
+        if (witnessed(e) && e.payload.npcId !== playerId) {
+          const who = npcName(str(e.payload.npcId));
+          happened.push(e.payload.arriving === true ? `${who} arrives.` : `${who} sets out for ${str(e.payload.to)}.`);
+        }
         break;
       case 'world.fact_discovered': {
         if (!witnessed(e)) break;
@@ -104,18 +118,26 @@ export function buildNarratorDigest(resolution: ActionResolution, options: Narra
     happened.push(`${npcName(action.targetId)} has nothing new to tell you right now; keep the exchange to courtesy and atmosphere.`);
   }
   if (state.character.fatigue >= 70) happened.push('You are visibly weary.');
+  if (resolution.status === 'blocked') happened.push(`The action did not happen: ${resolution.summary} No time passed.`);
+  const elapsed = num(events.find(e => e.type === 'action.resolved')?.payload.ticks);
+  if (elapsed && elapsed > 1 && action.kind !== 'travel') happened.push(`About ${describeDuration(elapsed).replace(/^about /, '')} passed.`);
   lines.push('', 'What the player perceived this turn:');
   lines.push(...(happened.length ? happened.map(h => `- ${h}`) : ['- Nothing notable beyond the attempt itself.']));
 
   // Observable surroundings.
+  if (state.world.clock) {
+    const env = environmentAt(state, here);
+    lines.push('', `Time: ${describeTime(env.time)}.${env.indoors ? '' : ` Weather: ${weatherWord(env.weather)}.`}`);
+  }
   lines.push('', `Current location: ${here}`);
   const note = options.locationNotes?.[here];
   if (note) lines.push(note);
 
   if (jianghu) {
     const present = jianghu.npcs.filter(n => n.alive && n.locationId === here);
+    const phase = timeOf(state.world).phase;
     lines.push('', 'People visibly present:');
-    lines.push(...(present.length ? present.map(n => `- ${n.name} (${n.role})`) : ['- No one of note.']));
+    lines.push(...(present.length ? present.map(n => `- ${n.name} (${n.role})${state.world.clock && isAsleep(n, phase) ? ' [asleep]' : ''}`) : ['- No one of note.']));
 
     const target = action.targetId ? jianghu.npcs.find(n => n.id === action.targetId) : undefined;
     const voice = target ? options.npcVoices?.[target.id] : undefined;

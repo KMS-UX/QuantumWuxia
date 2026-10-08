@@ -88,22 +88,22 @@ test('faction tension no longer drains every turn: it holds during an active eve
   assert.equal(cur.factions.find(f => f.id === 'faction-jade-hall')!.internalTension, 36);
 });
 
-test('authored seed events unfold on their authored timescale and stay valid for 70 turns', () => {
+test('authored seed events unfold on their authored timescale and stay valid for 70 ticks', () => {
   let state = createWuxiaSimulation('origin-disgraced-disciple');
   const completed: Record<string, number> = {}; const firstStage: Record<string, number> = {};
-  for (let t = 1; t <= 70; t++) {
-    const action = interpretPlayerAction(t % 3 ? 'Rest' : 'Meditate quietly', state, 'low');
+  for (let i = 0; state.world.turn < 70 && i < 200; i++) {
+    const action = interpretPlayerAction(i % 3 ? 'Rest' : 'Meditate quietly', state, 'low');
     const r = resolveAction(state, action, 60);
     for (const e of r.events) {
       const id = String(e.payload.rootEventId);
-      if (e.type === 'world.causal_chain_advanced') firstStage[id] ??= t;
-      if (e.type === 'world.causal_chain_completed') completed[id] = t;
+      if (e.type === 'world.causal_chain_advanced') firstStage[id] ??= r.state.world.turn;
+      if (e.type === 'world.causal_chain_completed') completed[id] = r.state.world.turn;
     }
     state = r.state;
-    assert.deepStrictEqual(validateState(state), [], `turn ${t}`);
+    assert.deepStrictEqual(validateState(state), [], `tick ${state.world.turn}`);
     for (const f of state.jianghu!.factions) assert.ok(f.internalTension >= 0 && f.internalTension <= 100);
   }
-  assert.ok(firstStage['event-toll-dispute'] >= 4, 'toll dispute should not escalate in the first few turns');
+  assert.ok(firstStage['event-toll-dispute'] >= 4, 'toll dispute should not escalate in the first few ticks');
   assert.ok(completed['event-toll-dispute'] >= 16, `toll dispute resolved too fast: ${completed['event-toll-dispute']}`);
   assert.ok(completed['event-autumn-assembly'] >= 40, `assembly resolved too fast: ${completed['event-autumn-assembly']}`);
   assert.ok(state.jianghu!.factions.find(f => f.id === 'faction-jade-hall')!.internalTension > 25, 'Jade Hall tension should persist');

@@ -118,7 +118,7 @@ test('injuries matter: arms handicap fighting, legs handicap travel, internal wo
   assert.ok(qiRecovery(hurt, 40) < qiRecovery(base, 40));
   const resting = disciple(); resting.character.wuxia!.injuries.push({ id: 'w', severity: 1, bodyRegion: 'torso', healingTurns: 10, untreated: true });
   const after = run(resting, 'Rest', 60).state.character.wuxia!.injuries[0];
-  assert.equal(after.healingTurns, 8); // one extra turn faster than waiting
+  assert.equal(after.healingTurns, 6); // rest takes two ticks; time heals two and rest doubles it
 });
 
 test('practice raises mastery with diminishing returns, costs Qi, and unlocks locked techniques over time', () => {

@@ -1,4 +1,7 @@
 import { regionName } from '../engine/bout';
+import { describeDuration, describeTime } from '../engine/clock';
+import { environmentAt } from '../engine/environment';
+import { weatherWord } from '../engine/weather';
 import type { ActionResolution, ResolutionStatus, StateEvent } from '../engine/types';
 
 export interface FallbackNarratorOptions {
@@ -34,7 +37,11 @@ export function fallbackNarration(resolution: ActionResolution, options: Fallbac
     if (e.type === 'world.location_changed' && witnessed(e)) {
       const to = str(e.payload.to) ?? state.character.locationId;
       const note = options.locationNotes?.[to];
-      parts.push(`You arrive at ${to}.${note ? ` ${firstSentence(note)}` : ''}`);
+      const ticks = typeof e.payload.ticks === 'number' ? e.payload.ticks : 0;
+      const took = ticks > 1 ? ` After ${describeDuration(ticks).replace(/^about /, '')} on the road${e.payload.delayed === true ? ', slowed by the weather,' : ''} you arrive at ${to}.` : ` You arrive at ${to}.`;
+      parts.push(`${took.trim()}${note ? ` ${firstSentence(note)}` : ''}`);
+    } else if (e.type === 'world.npc_moved' && witnessed(e) && e.payload.npcId !== playerId) {
+      parts.push(e.payload.arriving === true ? `${npcName(str(e.payload.npcId))} arrives.` : `${npcName(str(e.payload.npcId))} sets out for ${str(e.payload.to)}.`);
     } else if (e.type === 'world.fact_discovered' && witnessed(e)) {
       const fact = str(e.payload.fact); const via = str(e.payload.via);
       if (fact?.startsWith('inspected:')) parts.push(`You study ${fact.slice('inspected:'.length)} closely.`);
@@ -61,7 +68,12 @@ export function fallbackNarration(resolution: ActionResolution, options: Fallbac
     parts.push(`${npcName(action.targetId)} has little new to say; you trade courtesies.`);
   }
 
+  if (status === 'blocked') parts.push(`${resolution.summary} No time passes.`);
   const here = state.character.locationId;
+  if (state.world.clock) {
+    const env = environmentAt(state, here);
+    parts.push(`${describeTime(env.time)}.${env.indoors ? '' : ` ${weatherWord(env.weather).charAt(0).toUpperCase()}${weatherWord(env.weather).slice(1)} outside.`}`);
+  }
   const others = (state.jianghu?.npcs ?? []).filter(n => n.alive && n.locationId === here).map(n => n.name);
   if (others.length) parts.push(`Around you in ${here}: ${others.join(', ')}.`);
   return parts.join('\n\n');

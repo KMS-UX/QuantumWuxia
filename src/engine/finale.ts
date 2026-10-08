@@ -30,6 +30,8 @@ export interface FinaleGoalSpec {
   description: string;
   priority: number;
   targetId?: string;
+  notBefore?: number;
+  settle?: boolean;
 }
 
 export type FinaleEffect =
@@ -130,7 +132,8 @@ function applyEffect(e: FinaleEffect, j: JianghuState, sim: SimulationState, tur
       if (e.resources) n.resources = clamp(n.resources + e.resources);
       if (e.moveTo) {
         if (!sim.world.locationIds.includes(e.moveTo)) return false;
-        n.locationId = e.moveTo;
+        // A story relocation is a change of life, not an errand: they live there now and drop the old routine.
+        n.locationId = e.moveTo; n.homeId = e.moveTo; n.routine = undefined; n.transit = undefined;
       }
       return true;
     }

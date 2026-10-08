@@ -4,6 +4,8 @@ import { choiceCandidates, generateChoices, isHonourable, mergeChoices } from '.
 import { fallbackNarration } from '../../src/ai/fallbackNarrator';
 import { interpretPlayerAction } from '../../src/engine/actionInterpreter';
 import { resolveAction } from '../../src/engine/resolveAction';
+import { timeOf } from '../../src/engine/clock';
+import { isAsleep } from '../../src/engine/routine';
 import { validateProposedAction } from '../../src/engine/actionContract';
 import { validateState } from '../../src/engine/validateState';
 import {
@@ -94,13 +96,15 @@ test('the fallback narrator reports what the player perceived: hearsay, travel a
   assert.ok(talk.includes('Old Tea Keeper tells you what is being said'));
   assert.ok(talk.includes('cannot yet tell how much of it is true'));
   const trip = fallbackNarration(resolveAction(sim, interpretPlayerAction('Travel to Lantern Ferry', sim, 'low'), 60), options);
-  assert.ok(trip.includes('You arrive at Lantern Ferry.'));
+  assert.ok(/you arrive at Lantern Ferry\./.test(trip) && trip.includes('on the road'), trip);
   const failed = fallbackNarration(resolveAction(sim, interpretPlayerAction('Talk to Old Tea Keeper', sim, 'low'), 5), options);
   assert.ok(!failed.includes('tells you what is being said'));
 
   let state = createWuxiaSimulation('origin-escort-apprentice'); let finaleText = '';
-  for (let t = 1; t <= 30 && !finaleText; t++) {
-    const r = resolveAction(state, interpretPlayerAction(t <= 3 || t >= 16 ? 'Talk to Captain Ma Tie' : 'Rest', state, 'low'), 60);
+  for (let t = 1; t <= 40 && !finaleText; t++) {
+    const ma = state.jianghu!.npcs.find(n => n.id === 'npc-ma-tie')!;
+    const awake = !isAsleep(ma, timeOf(state.world).phase);
+    const r = resolveAction(state, interpretPlayerAction(awake && (state.world.turn <= 9 || state.world.turn >= 15) ? 'Talk to Captain Ma Tie' : 'Rest', state, 'low'), 60);
     state = r.state;
     if (r.events.some(e => e.type === 'world.finale_resolved')) finaleText = fallbackNarration(r, options);
   }

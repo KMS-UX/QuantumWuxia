@@ -14,6 +14,8 @@ export interface OriginProfile {
   zh: string;
   summary: string;
   startLocationId: string;
+  /** Tick of day the story opens at (0 small hours, 1 dawn, 2 morning, 3 afternoon, 4 evening, 5 night). */
+  startTickOfDay?: number;
   attributes: Partial<Record<'strength' | 'agility' | 'constitution' | 'perception' | 'intelligence' | 'charisma' | 'luck', number>>;
   arts: Array<{ id: string; mastery: number }>;
   inventory: string[];
@@ -60,7 +62,7 @@ export const ORIGINS: OriginProfile[] = [
   {
     id: 'origin-escort-apprentice', title: 'Escort Apprentice', zh: '鏢局學徒',
     summary: 'You guard guild caravans with a saber you can barely afford to lose.',
-    startLocationId: 'Lantern Ferry',
+    startLocationId: 'Lantern Ferry', startTickOfDay: 3,
     attributes: { constitution: 12, strength: 11 },
     arts: [{ id: 'art-willow-leaf-saber', mastery: 28 }],
     inventory: ['saber', 'guild escort token'],
@@ -76,7 +78,7 @@ export const ORIGINS: OriginProfile[] = [
   {
     id: 'origin-ferry-orphan', title: 'Ferry Orphan', zh: '渡口孤兒',
     summary: 'Raised on the river by people who owed nobody and told you nothing about your parents.',
-    startLocationId: 'Lantern Ferry',
+    startLocationId: 'Lantern Ferry', startTickOfDay: 4,
     attributes: { agility: 13, luck: 14, charisma: 11 },
     arts: [{ id: 'art-swallow-skimming-steps', mastery: 15 }],
     inventory: ['river knife', 'a child\'s jade charm'],

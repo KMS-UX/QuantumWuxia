@@ -1,4 +1,7 @@
+import { phaseWord, timeOf } from '../engine/clock';
+import { environmentAt } from '../engine/environment';
 import { chainPace } from '../engine/jianghu';
+import { isAsleep, nextAwakePhase } from '../engine/routine';
 import { interpretPlayerAction } from '../engine/actionInterpreter';
 import type { ProposedAction, RiskLevel, SimulationState } from '../engine/types';
 import type { NarrationChoice } from './validateNarration';
@@ -41,9 +44,14 @@ export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}
   });
   if (imminent) add('Watch and listen closely to see how things unfold here', 'low', 'inspect');
 
-  // 2. People present, those with news the player has not heard first.
+  // 2. People present who are awake, those with news the player has not heard first.
   const playerId = state.character.id;
-  const present = (jianghu?.npcs ?? []).filter(n => n.alive && n.locationId === here);
+  const calendar = state.world.clock !== undefined;
+  const phase = timeOf(state.world).phase;
+  const env = calendar ? environmentAt(state, here) : undefined;
+  const inHere = (jianghu?.npcs ?? []).filter(n => n.alive && n.locationId === here);
+  const present = inHere.filter(n => !(calendar && isAsleep(n, phase)));
+  const asleep = inHere.filter(n => calendar && isAsleep(n, phase));
   const hasNews = (id: string) => jianghu!.rumors.some(r => r.knownBy.includes(id) && !r.knownBy.includes(playerId));
   const people = [...present].sort((a, b) => Number(hasNews(b.id)) - Number(hasNews(a.id)) || a.id.localeCompare(b.id));
   if (people[0]) add(`Talk to ${people[0].name}`, 'low', 'talk');
@@ -53,6 +61,10 @@ export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}
   if (features.length) add(`Inspect the ${features[state.world.turn % features.length]}`, 'low', 'inspect');
 
   // 4. Somewhere to go: nearest first.
+  // Someone worth talking to is asleep: the way to reach them is to let time pass.
+  const sleeper = asleep.find(n => hasNews(n.id)) ?? asleep[0];
+  const wakes = sleeper ? nextAwakePhase(sleeper, phase) : undefined;
+  if (sleeper && wakes && !people[0]) add(`Rest until ${phaseWord(wakes)} when ${sleeper.name} will be up`, 'low', 'rest');
   const roads = (ctx.neighbours?.(here) ?? []).filter(r => state.world.locationIds.includes(r.id)).sort((a, b) => a.days - b.days || a.id.localeCompare(b.id));
   const risk = (days: number): RiskLevel => (days >= 3 ? 'high' : days === 2 ? 'medium' : 'low');
   if (roads[0]) add(`Travel to ${roads[0].id}`, risk(roads[0].days), 'travel');
@@ -69,6 +81,8 @@ export function choiceCandidates(state: SimulationState, ctx: ChoiceContext = {}
   if (people[1]) add(`Talk to ${people[1].name}`, 'low', 'talk');
   if (roads[1]) add(`Travel to ${roads[1].id}`, risk(roads[1].days), 'travel');
   if (features.length > 1) add(`Inspect the ${features[(state.world.turn + 1) % features.length]}`, 'low', 'inspect');
+  if (env && !env.time.isNight && ['storm', 'blizzard'].includes(env.weather.kind) && !env.indoors) add('Wait out the weather for a day', 'low', 'rest');
+  if (env?.time.isNight) add('Rest until dawn', 'low', 'rest');
   const worn = state.character.fatigue >= 40 || state.character.hp < state.character.maxHp;
   add(worn ? 'Rest and recover your strength' : 'Meditate quietly to steady your Qi', 'low', worn ? 'rest' : 'meditate');
   add(worn ? 'Meditate quietly to steady your Qi' : 'Rest and recover your strength', 'low', worn ? 'meditate' : 'rest');
